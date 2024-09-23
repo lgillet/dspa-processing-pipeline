@@ -1,0 +1,428 @@
+rm(list = ls())
+gc()
+## Loading packages
+# library(grid)
+# library(janitor)
+library(ggrepel)
+library(RColorBrewer)
+# library(broom)
+# library(data.table)
+library(protti)
+# library(drc)
+# library(ggplot2)
+# library(magrittr)
+library(tidyverse)
+# library(phylotools)
+library(ComplexHeatmap)
+# library(ggfortify)
+library(ggbiplot)
+library(gridExtra)
+library(VennDiagram)
+library(qvalue)
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) # set working directory to location of R script
+setwd("Y:/lgillet/experiments/LG001_Varia/LiP_School")
+getwd()
+## Loading functions
+
+#filter based on identification q-values calculated in Spectronaut (function from Ludovic)
+filter_qvalue <- function (data, peptide_column_name, condition_column_name, qvalue_column_name, min_qvalue, min_values_per_condition, in_min_conditions) {
+  peptide_list <- {{data}} %>%
+    dplyr::group_by({{peptide_column_name}}, {{condition_column_name}}) %>%
+    dplyr::summarise(qvalue_below_count = sum(na.omit({{qvalue_column_name}}) <= {{min_qvalue}})) %>% 
+    dplyr::filter(qvalue_below_count >= {{min_values_per_condition}}) %>% # at least with "min_values_per_conditions" measurements
+    dplyr::group_by({{peptide_column_name}}) %>%
+    dplyr::count(qvalue_below_count) %>% 
+    dplyr::summarise(n2_and_n3 = sum(n)) %>% 
+    dplyr::filter(n2_and_n3 >= {{in_min_conditions}}) %>% # in at least 2 r_conditions 
+    dplyr::pull({{peptide_column_name}})
+  dplyr::filter({{data}}, {{peptide_column_name}} %in% peptide_list)
+}
+
+filter_intensity <- function (data, peptide_column_name, condition_column_name, intensity_column_name, min_intensity, min_values_per_condition, in_min_conditions) {
+  peptide_list <- {{data}} %>%
+    dplyr::group_by({{peptide_column_name}}, {{condition_column_name}}) %>%
+    dplyr::summarise(qvalue_below_count = sum(na.omit({{intensity_column_name}}) >= {{min_intensity}})) %>% 
+    dplyr::filter(qvalue_below_count >= {{min_values_per_condition}}) %>% # at least with "min_values_per_conditions" measurements
+    dplyr::group_by({{peptide_column_name}}) %>%
+    dplyr::count(qvalue_below_count) %>% 
+    dplyr::summarise(n2_and_n3 = sum(n)) %>% 
+    dplyr::filter(n2_and_n3 >= {{in_min_conditions}}) %>% # in at least 2 r_conditions 
+    dplyr::pull({{peptide_column_name}})
+  dplyr::filter({{data}}, {{peptide_column_name}} %in% peptide_list)
+}
+
+
+filter_na <- function (data, peptide_column_name, condition_column_name, intensity_column_name, min_values_per_condition, in_min_conditions) {
+  peptide_list <- {{data}} %>%
+    dplyr::group_by({{peptide_column_name}}, {{condition_column_name}}) %>%
+    dplyr::summarise(non_na_count = sum(!is.na({{intensity_column_name}}))) %>% 
+    dplyr::filter(non_na_count >= {{min_values_per_condition}}) %>% # at least with "min_values_per_conditions" measurements
+    dplyr::group_by({{peptide_column_name}}) %>%
+    dplyr::count(non_na_count) %>% 
+    dplyr::summarise(n2_and_n3 = sum(n)) %>% 
+    dplyr::filter(n2_and_n3 >= {{in_min_conditions}}) %>% # in at least 2 r_conditions 
+    dplyr::pull({{peptide_column_name}})
+  dplyr::filter({{data}}, {{peptide_column_name}} %in% peptide_list)
+}
+
+filter_singlehits <- function (data, protein_column_name, peptide_column_name, min_peptides) {
+  protein_list <- {{data}} %>%
+    dplyr::group_by({{protein_column_name}}) %>%
+    dplyr::distinct({{protein_column_name}}, {{peptide_column_name}}) %>% 
+    dplyr::count({{protein_column_name}}) %>% 
+    dplyr::filter(n >= {{min_peptides}}) %>% # at least 2 peptides
+    dplyr::pull({{protein_column_name}})
+  dplyr::filter({{data}}, {{protein_column_name}} %in% protein_list)
+}
+
+filter_cv <- function (data, peptide_column_name, condition_column_name, intensity_column_name, max_cv, in_min_conditions) {
+  peptide_list <- {{data}} %>%
+    dplyr::group_by({{peptide_column_name}}, {{condition_column_name}}) %>%
+    dplyr::summarise(cv_count = sum( sd(2^{{intensity_column_name}}, na.rm = TRUE) / mean(2^{{intensity_column_name}}, na.rm = TRUE) < {{max_cv}} ) ) %>% 
+    dplyr::filter(cv_count >= 1) %>% # at least with "min_values_per_conditions" measurements
+    dplyr::group_by({{peptide_column_name}}) %>%
+    dplyr::summarise(cv_count2 = sum(cv_count)) %>% 
+    dplyr::filter(cv_count2 >= {{in_min_conditions}}) %>% # in at least 2 conditions 
+    dplyr::pull({{peptide_column_name}})
+  dplyr::filter({{data}}, {{peptide_column_name}} %in% peptide_list)
+}
+
+filter_medianintensity <- function (data, peptide_column_name, condition_column_name, intensity_column_name, min_intensity, in_min_conditions) {
+  peptide_list <- {{data}} %>%
+    dplyr::group_by({{peptide_column_name}}, {{condition_column_name}}) %>%
+    dplyr::summarise(int_above_min = median({{intensity_column_name}}, na.rm = TRUE) >= {{min_intensity}}) %>%
+    dplyr::filter(int_above_min == TRUE) %>%
+    dplyr::group_by({{peptide_column_name}}) %>%
+    dplyr::count({{peptide_column_name}}) %>%
+    dplyr::filter(n >= {{in_min_conditions}}) %>%      
+    dplyr::pull({{peptide_column_name}}) # optional: arrange(pg_protein_groups, desc(mean_int))
+  dplyr::filter({{data}}, {{peptide_column_name}} %in% peptide_list)
+}
+
+get_topN_peptides <- function (data, protein_column_name, peptide_column_name, intensity_column_name, top_number) {
+  peptide_list <- {{data}} %>%
+    dplyr::group_by({{protein_column_name}}, {{peptide_column_name}}) %>%
+    dplyr::summarise(mean_int = mean({{intensity_column_name}}, na.rm = TRUE)) %>%
+    dplyr::top_n({{top_number}}) %>%     # equivalent to: filter(min_rank(desc(mean_int)) <= 50) 
+    dplyr::pull({{peptide_column_name}}) # optional: arrange(pg_protein_groups, desc(mean_int))
+  dplyr::filter({{data}}, {{peptide_column_name}} %in% peptide_list)
+}
+
+correct_batch <- function (data, peptide_column_name, batch_column_name, intensity_column_name) {
+  batch_corrected <- {{data}} %>% 
+    dplyr::ungroup() %>% 
+    dplyr::distinct() %>% 
+    dplyr::group_by({{peptide_column_name}}) %>% 
+    dplyr::mutate(global_mean = base::mean({{intensity_column_name}}, na.rm = TRUE)) %>% 
+    dplyr::group_by({{batch_column_name}}, {{peptide_column_name}}) %>% 
+    dplyr::mutate(batch_mean = base::mean({{intensity_column_name}}, na.rm = TRUE)) %>% 
+    dplyr::ungroup() %>% 
+    dplyr::mutate(batch_corrected = {{intensity_column_name}} - batch_mean + global_mean) %>% 
+    dplyr::select(-batch_mean, -global_mean)
+  return(batch_corrected)
+}
+
+## Loading data
+
+DIA_raw <- read_protti("./20231005_111328_LiP_School_Lydia_SN18_directDIA_Report.tsv")
+unique(DIA_raw$r_file_name)
+annotation <- read.csv("./20231005_111328_LiP_School_Lydia_SN18_directDIA_Report_SampleAnnotation.txt", sep = "\t")
+
+proteome <- phylotools::read.fasta("./190417_Human_sp_only_iRT_1liner.fasta") %>% janitor::clean_names() %>%
+  dplyr::mutate(uniprot_id = stringr::str_extract(seq_name, "^[^ ]+")) %>%
+  rowwise() %>%
+  dplyr::mutate(uniprot_id = strsplit(uniprot_id, "|", fixed = TRUE)[[1]][2]) %>%
+  dplyr::mutate(protein_sequence = seq_text) %>% 
+  dplyr::mutate(length_protein = str_length(protein_sequence)) %>% 
+  dplyr::mutate(protein_id = strsplit(seq_name, "[| ]")[[1]][3]) %>%
+  dplyr::mutate(protein_desc1 = strsplit(seq_name, "(_HUMAN )+")[[1]][2]) %>%
+  dplyr::mutate(protein_desc = strsplit(protein_desc1, "( OS=)")[[1]][1]) %>%
+  dplyr::select(-seq_name, -seq_text, -protein_desc1)
+
+DIA_raw <- DIA_raw %>%
+  dplyr::select(-c("r_condition", "r_replicate")) %>% 
+  left_join(annotation, by = "r_file_name") %>%
+  dplyr::mutate(eg_precid = paste(eg_modified_sequence, fg_charge, sep =""))
+
+DIA_LiP_clean <- DIA_raw %>%
+  filter(eg_is_decoy == "FALSE") %>%
+  filter(fg_ms2raw_quantity > 100) %>%
+  filter_intensity(., eg_precid, r_condition, fg_ms2raw_quantity, 5000, min_values_per_condition = 2, in_min_conditions = 1) %>% 
+  # filter_qvalue(., eg_precid, r_condition, eg_qvalue, 1E-5, min_values_per_condition = 2, in_min_conditions = 1) %>% 
+  dplyr::mutate(intensity_log2 = log2(fg_ms2raw_quantity)) %>%
+  protti::normalise(sample = r_condrep, intensity_log2 = intensity_log2) %>%
+  dplyr::mutate(uniprot_id = pg_protein_accessions)
+
+
+DIA_LiP_clean <- DIA_LiP_clean %>%
+  left_join(proteome, by = "uniprot_id") %>%
+  protti::find_peptide(protein_sequence, pep_stripped_sequence) %>%
+  protti::assign_peptide_type(aa_before, last_aa) %>% 
+  rowwise() %>% 
+  mutate(pep_nr_of_missed_cleavages = str_count(substr(pep_stripped_sequence, 1, str_length(pep_stripped_sequence) - 1), pattern = "K") + str_count(substr(pep_stripped_sequence, 1, str_length(pep_stripped_sequence) - 1), pattern = "R") - str_count(pep_stripped_sequence, pattern = "KP") - str_count(pep_stripped_sequence, pattern = "RP")) %>% 
+  mutate(r_condrep = factor(r_condrep, levels = c("DMSO_LiP_1", "DMSO_LiP_2", "DMSO_LiP_3", "DMSO_LiP_4", "Rapa_LiP_1", "Rapa_LiP_2", "Rapa_LiP_3", "Rapa_LiP_4", "DMSO_TC_1", "DMSO_TC_2", "DMSO_TC_3", "DMSO_TC_4", "Rapa_TC_1", "Rapa_TC_2", "Rapa_TC_3", "Rapa_TC_4"))) %>% 
+  mutate(r_condition = factor(r_condition, levels = c("DMSO_LiP", "Rapa_LiP", "DMSO_TC", "Rapa_TC")))
+
+unique(DIA_LiP_clean$r_condrep)
+
+# clean up data further before statistical analysis 
+DIA_LiP_clean <- DIA_LiP_clean %>% 
+  filter_singlehits(., pg_protein_groups, eg_modified_sequence, min_peptides = 2) 
+
+DIA_LiP_clean_na <- DIA_LiP_clean %>% 
+  select("eg_precid", "r_condrep", "normalised_intensity_log2", "pg_protein_groups", "r_condition") %>% 
+  complete(nesting(pg_protein_groups, eg_precid), nesting(r_condition, r_condrep)) %>% 
+  filter_na(., eg_precid, r_condition, normalised_intensity_log2, min_values_per_condition = 2, in_min_conditions = 1) 
+
+
+##### imputation functions with fixed set.seeds
+impute_MNAR <- function(n_missing, min, sd, rnk){
+  rnorm(n_missing, mean = min - log2(3), sd = sd)[rnk]
+}
+
+impute_MAR <- function(n_missing, mean, sd, rnk){
+  rnorm(n_missing, mean = mean, sd = sd)[rnk]
+}
+
+
+impute_DIA4 <- function(data, r_condition, r_condrep, precursor, intensity){
+  data_imputed <- data %>%
+    dplyr::select({{r_condrep}}, {{r_condition}}, {{precursor}}, {{intensity}})%>%
+    tidyr::complete({{precursor}}) %>%
+    dplyr::arrange(!is.na({{intensity}}), {{r_condrep}}) %>% 
+    group_by({{precursor}}, {{r_condition}})%>%
+    dplyr::mutate(mean = mean({{intensity}}, na.rm = TRUE)) %>%
+    dplyr::mutate(sd = sd({{intensity}}, na.rm = TRUE))%>%
+    dplyr::mutate(missing = sum(is.na({{intensity}})))%>%
+    dplyr::mutate(repl = dplyr::n())%>%
+    dplyr::mutate(rnk = 1:dplyr::n())%>%
+    group_by({{precursor}})%>%
+    dplyr::mutate(sd = mean(sd, na.rm = TRUE))%>%
+    dplyr::mutate(min = min({{intensity}}, na.rm = TRUE))%>%
+    rowwise() %>%
+    dplyr::mutate(NA_type = ifelse(is.na({{intensity}}),
+                                  ifelse(repl - missing == 0, "MNAR", "MAR"), "complete")) %>%
+    dplyr::mutate(normalised_intensity_imputed_log2 = ifelse(is.na({{intensity}}),
+                                                             ifelse(repl - missing == 0, impute_MNAR(missing, min, sd, rnk), impute_MAR(missing, mean, sd, rnk)), {{intensity}})) %>%
+    dplyr::mutate(imputed = is.na({{intensity}}))%>%
+    dplyr::select({{r_condrep}}, {{precursor}}, normalised_intensity_imputed_log2, NA_type, imputed)%>%
+    ungroup()
+  
+  data %>%
+    left_join(data_imputed, by = c(as_label(enquo(r_condrep)), as_label(enquo(precursor))))
+}
+
+# run it this way:
+
+set.seed(123)
+DIA_LiP_imputed <- DIA_LiP_clean_na %>%
+  impute_DIA4(r_condition, r_condrep, eg_precid, normalised_intensity_log2) 
+
+# check values before/after imputation
+DIA_LiP_imputed %>%
+  dplyr::select(normalised_intensity_log2,normalised_intensity_imputed_log2) %>%
+  pivot_longer(cols = everything(),
+               names_to = "imputed",
+               values_to = "intensity") %>%
+  filter(!is.na(intensity)) %>%
+  ggplot(aes(intensity, fill = imputed)) +
+  labs(title = "Histogram of intensities before and after imputation",
+       x = "Log2 Intensity",
+       y = "Frequency",
+       fill = "Type") +
+  geom_histogram(
+    binwidth = 0.5,
+    color = "black",
+    position = "identity",
+    alpha = 0.7
+  ) +
+  theme_bw()
+
+ggsave(paste("./", format(Sys.time(), '%y%m%d'), "_distribution_imputed_values.pdf", sep = ""),  height=10, width=10, units='in', dpi=600)
+
+DIA_LiP_imputed %>%
+  dplyr::select(r_condrep, eg_precid, NA_type) %>%
+  group_by(r_condrep) %>% 
+  dplyr::count(NA_type) %>% 
+  mutate(NA_type = factor(NA_type, levels = c("MAR", "MNAR", "complete"))) %>% 
+  ggplot(aes(x = r_condrep, y = n, fill = NA_type)) +
+    labs(title = "Number of true/missing values before and after imputation",
+        x = "r_condrep",
+        y = "Number of values",
+        fill = "Type") +
+    geom_bar(stat="identity", position = "stack") +
+    theme_bw() +     
+  theme(legend.position = "right", axis.text.x = element_text(angle = 90))+
+  guides(shape = guide_legend(override.aes = list(size=3,linetype=0)))+
+  scale_fill_manual(name='Missing value types', values = c("MAR" = "red", "MNAR" = "blue", "complete" = "green")) + 
+  scale_size(guide = 'none') +
+  theme(text = element_text(size=10),
+        legend.key=element_blank(),
+        legend.title=element_blank(),
+        legend.box="vertical") 
+
+# protein profile plots after imputation
+DIA_LiP_imputed_top50_list <- DIA_LiP_imputed %>%
+  mutate(imputed = case_when(NA_type == "complete" ~ 2,
+                             NA_type == "MNAR" ~ 0,
+                             NA_type == "MAR" ~ 1)) %>% 
+  get_topN_peptides(., pg_protein_groups, eg_precid, normalised_intensity_imputed_log2, 50) %>% 
+  ungroup() %>% 
+  complete(nesting(pg_protein_groups, eg_precid), nesting(r_condrep, r_condition) ) %>% 
+  ungroup() %>% 
+  split(.$pg_protein_groups)
+
+plot_function3b <- function(x) {
+  ggplot(x, aes(x=r_condrep, y=normalised_intensity_imputed_log2, group = eg_precid, shape = eg_precid, colour = eg_precid)) +
+    ggtitle(unique(x$pg_protein_groups)) +
+    geom_point(aes(shape=eg_precid, size = imputed)) + 
+    scale_shape_manual(values = c(letters, LETTERS)) +
+    geom_line(aes(x=r_condrep, y=normalised_intensity_imputed_log2), linetype="solid") +
+    # scale_linetype_manual(name="Protein Lines",values=c("prot_intensity" = "dashed", "prot_corrected" = "F1")) +
+    theme_bw() + 
+    theme(legend.position = "right", axis.text.x = element_text(angle = 90))+
+    guides(shape = guide_legend(override.aes = list(size=3,linetype=0)))+
+    scale_size(guide = 'none') +
+    theme(text = element_text(size=10),
+          legend.key=element_blank(),
+          legend.title=element_blank(),
+          legend.box="vertical") 
+  }
+
+
+prot_plots <- map(DIA_LiP_imputed_top50_list, plot_function3b)
+
+ml <- marrangeGrob(prot_plots, nrow = 2, ncol = 1)
+ggsave(paste("./", format(Sys.time(), '%y%m%d'), "_proteinplots_DIA_LiP_egprecid_imputed_run1.pdf", sep = ""),  ml, height=20, width=20, units='in', dpi=600)
+
+
+# perform precursor to peptide inference
+DIA_imputed_pep <- DIA_LiP_imputed %>%
+  left_join(distinct(DIA_LiP_clean, eg_precid, eg_modified_sequence, start, end), by = "eg_precid") %>% 
+  select(-r_condition) %>% 
+  left_join(annotation, by = "r_condrep") %>% 
+  group_by(eg_modified_sequence, r_condrep) %>%
+  dplyr::mutate(pep_imputed_intensity = log2(sum(2^normalised_intensity_imputed_log2))) %>%
+  dplyr::mutate(pep_NA_type = case_when(all(NA_type == "complete") ~ "complete",
+                             any(NA_type == "MAR") ~ "MAR",
+                             any(NA_type == "MNAR") ~ "MNAR")) %>% 
+  distinct( pg_protein_groups, eg_modified_sequence, r_condrep, r_condition, pep_imputed_intensity, pep_NA_type) %>%
+  as_tibble() %>% 
+  left_join(distinct(DIA_LiP_clean, eg_modified_sequence, start, end), by = "eg_modified_sequence") 
+
+
+##### perform the statistical test on different pairwise comparisons
+unique(DIA_imputed_pep$r_condition)
+
+set1 <- c("Rapa_LiP", "DMSO_LiP")
+# set2 <- c("Rapa_TC", "DMSO_TC")
+# set3 <- c("DMSO_LiP", "DMSO_TC")
+
+##### differential abundance calculation
+anova_setN_signif_combined <- data.frame(set = character(), NbprecId = character(), NbSignif = character()) 
+anova_set_combined <- data.frame(c(pg_protein_groups = character(), eg_modified_sequence = character(), aov_p_value = character(), ttest_p_value = character(), log2fc = character(), aov_adj_p_value = character(), ttest_adj_p_value = character(), significant = character(), fold_change = character(), start = character(), end = character(), pep_type = character(), label = character(), label2 = character(), set = character(), nb_signif_peptides = character(), nb_total_peptides = character()))
+
+##### setN
+for (setX in c("set1")) {
+  
+  setN <- eval(parse(text = setX))
+  
+  goodpeptides_setN <- DIA_LiP_clean %>% 
+    filter(r_condition %in% setN) %>% 
+    filter_qvalue(., eg_precid, r_condition, eg_qvalue, 1E-3, min_values_per_condition = 3, in_min_conditions = 1) %>%
+    # filter_cv(., eg_precid, r_condition, normalised_intensity_log2, 0.25, in_min_conditions = 1) %>% 
+    select(eg_modified_sequence) %>% 
+    distinct() %>% 
+    pull()
+  
+  DIA_corrected_imputed_setN <- DIA_imputed_pep %>%
+    filter(r_condition %in% setN) %>% 
+    filter(eg_modified_sequence %in% goodpeptides_setN) %>% 
+    filter_na(., eg_modified_sequence, r_condition, pep_imputed_intensity, min_values_per_condition = 1, in_min_conditions = 2) %>%
+    distinct(pg_protein_groups, eg_modified_sequence, r_condrep, r_condition, pep_imputed_intensity, pep_NA_type, start, end) %>%
+    filter(!is.na(pep_imputed_intensity)) %>%
+    arrange(desc(pg_protein_groups), desc(eg_modified_sequence), desc(r_condrep)) %>% 
+    as_tibble() %>% 
+    group_by(eg_modified_sequence, r_condition) %>%
+    dplyr::mutate(imputed = case_when(all(pep_NA_type == "complete") ~ "complete",
+                                      any(pep_NA_type == "MAR") ~ "MAR",
+                                      any(pep_NA_type == "MNAR") ~ "MNAR")) %>% 
+    ungroup() 
+
+  anova_setN <- DIA_corrected_imputed_setN %>%
+    group_by(eg_modified_sequence) %>%
+    dplyr::mutate(aov_p_value = anova(aov( pep_imputed_intensity ~ r_condition))[["Pr(>F)"]][1]) %>%
+    # dplyr::mutate(ttest_p_value = t.test(pep_imputed_intensity ~ r_condition, paired = FALSE, alternative = "two.sided")[["p.value"]][1]) %>%
+    dplyr::mutate(log2fc = log2(mean(2^pep_imputed_intensity[r_condition == setN[[1]]], na.rm = TRUE) / mean(2^pep_imputed_intensity[r_condition == setN[[2]]], na.rm = TRUE) ) ) %>% 
+    ungroup() %>% 
+    select(-r_condrep, -r_condition, -pep_imputed_intensity) %>% 
+    distinct(eg_modified_sequence, .keep_all = TRUE) %>% 
+    dplyr::mutate(aov_adj_p_value_set = p.adjust(aov_p_value, method="fdr")) %>%
+    # dplyr::mutate(ttest_adj_p_value_set = p.adjust(ttest_p_value, method="fdr")) %>%
+    dplyr::mutate(significant = ifelse((aov_adj_p_value_set<0.05), "Signif", "NonSignif")) %>%
+    dplyr::mutate(fold_change = ifelse((abs(log2fc)>log2(2)), "Above", "Below")) %>% 
+    dplyr::mutate(significant = paste(significant, fold_change, sep = "_")) %>% 
+    dplyr::filter(!(significant == "NA_Below" )) %>% 
+    rowwise() %>% 
+    dplyr::mutate(label = paste(pg_protein_groups, "@[", start, "-", end, "]", sep = "")) %>% 
+    dplyr::mutate(label2 = ifelse(significant == "Signif_Above", label, NA)) %>% 
+    dplyr::mutate(set = paste(setN, collapse = "_")) %>% 
+    ungroup() %>% 
+    dplyr::arrange(aov_p_value) 
+  
+  adjpval_threshold <- anova_setN %>%
+    ungroup() %>%
+    dplyr::slice(tail(which(anova_setN$aov_adj_p_value_set < 0.05), 1), tail(which(anova_setN$aov_adj_p_value_set < 0.05), 1) +1) %>%
+    summarise(mean(aov_p_value)) %>%
+    pull()
+  
+  # adjpval_threshold <- 0.001
+  
+  # volcano plot
+  ggplot(anova_setN, aes(x=log2fc, y=-log10(aov_p_value))) +
+    geom_point(aes(colour = significant, shape = imputed), alpha = 0.5) +
+    scale_colour_manual(values = c("Signif_Above"= "green", "Signif_Below"="red", "NonSignif_Above"= "orange", "NonSignif_Below" = "black")) +
+    scale_shape_manual(name = "imputed", values = c("complete" = 19, "MAR" = 10, "MNAR" = 0)) + 
+    theme_bw() +
+    ggtitle(paste(setN, collapse = "_vs_")) +
+    geom_vline(xintercept = log2(2), col = "grey", linetype = "dashed", linewidth = 1) +
+    geom_vline(xintercept = -log2(2), col = "grey", linetype = "dashed", linewidth = 1) +
+    geom_hline(yintercept = -log10(adjpval_threshold), col = "grey", linetype = "dashed", linewidth = 1) +
+    geom_text_repel(size = 3, aes(x = log2fc, y = -log10(aov_p_value), label = label2), min.segment.length = unit(0, 'lines'), nudge_y = 0.1)
+  
+  ggsave(paste(paste("./", format(Sys.time(), '%y%m%d'), "_volcano_ggplot_pep_corrected_aovadjpval005set_", paste(setN, collapse = "_vs_"), ".pdf", sep = ""),  sep = ""), width = 24, height = 12, units = 'cm')
+
+  ggplot(anova_setN, aes(x=aov_p_value)) +
+    geom_histogram(col = "black", binwidth = 0.05)
+  
+  ggsave(paste("./", format(Sys.time(), '%y%m%d'), "_pvalues_distribution", paste(setN, collapse = "_vs_"), ".pdf", sep = ""), width = 24, height = 12, units = 'cm')
+  
+  write.table(anova_setN, paste(paste("./", format(Sys.time(), '%y%m%d'), "_anova_pep_corrected_aovadjpval005set_", paste(setN, collapse = "_vs_"), ".tsv", sep = ""), sep = "") , sep = "\t", quote = FALSE, row.names = FALSE)
+  
+  anova_setN_signif_combined <- rbind(anova_setN_signif_combined, c(paste(setN, collapse = "_vs_"), dim(anova_setN)[1], dim(subset(anova_setN, aov_adj_p_value_set < 0.05& abs(log2fc) > log2(2)) )[1]))
+  
+  anova_setN_signif <- anova_setN %>% 
+    filter(aov_adj_p_value_set<0.05) %>% 
+    filter(abs(log2fc) >= log2(2))
+  
+  anova_setN_signif_countpeptides <- anova_setN %>% 
+    filter(pg_protein_groups %in% unique(anova_setN_signif$pg_protein_groups)) %>% 
+    group_by(pg_protein_groups) %>% 
+    dplyr::count(pg_protein_groups) %>% 
+    dplyr::rename(nb_signif_peptides = n)
+  
+  anova_setN_signif_countproteins <- DIA_corrected_imputed_setN %>% 
+    dplyr::filter(pg_protein_groups %in% unique(anova_setN_signif$pg_protein_groups)) %>% 
+    group_by(pg_protein_groups) %>% 
+    dplyr::count(pg_protein_groups) %>% 
+    dplyr::rename(nb_total_peptides = n)
+  
+  anova_setN <- anova_setN %>% 
+    left_join(anova_setN_signif_countpeptides, by = "pg_protein_groups") %>% 
+    left_join(anova_setN_signif_countproteins, by = "pg_protein_groups")
+  
+  anova_set_combined <- rbind(anova_set_combined, anova_setN)
+  
+}
+
