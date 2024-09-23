@@ -387,51 +387,6 @@ write.csv(t_test_result_mod_t_test_pep, file = output_path_diff_abundance, row.n
 ```
 
 
-
-###LiP-Quant
-
-
-```{r LiP_Quant, message = FALSE, warning = FALSE}
-
-DIA_clean_uniprot_summed$conc_frag <- as.numeric(gsub("_mM", "", DIA_clean_uniprot_summed$r_condition))
-
-
-
-
-fit <- parallel_fit_drc_4p(
-  DIA_clean_uniprot_summed,
-  r_file_name,
-  pep_stripped_sequence,
-  normalised_intensity_log2,
-  conc_frag,
-  filter = "post",
-  replicate_completeness = 0.7,
-  condition_completeness = 0.5,
-  correlation_cutoff = 0.8,
-  log_logarithmic = TRUE,
-  retain_columns =  c(pg_protein_accessions, start, end, pep_type)
-)
-
-
-
-
-
-# Specify the output path
-output_path_fit <- "add/here.csv" 
-
-# Save the dataframe as a CSV file
-write.csv(fit, file = output_path_fit, row.names = FALSE)
-
-
-
-
-
-```
-
-
-
-
-
 ##TC
 
 
