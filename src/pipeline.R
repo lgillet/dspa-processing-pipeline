@@ -51,8 +51,8 @@ output_dir <- params$output_dir
 
 experiment_folder_path <- file.path(output_dir, experiment_id)
 
-if (!dir.exists("/preprocessed")) {
-  dir.create("/preprocessed", recursive = TRUE)
+if (!dir.exists("./preprocessed")) {
+  dir.create("./preprocessed", recursive = TRUE)
 }
 
 # Now create the experiment folder
@@ -85,11 +85,14 @@ sessionInfo()
 # Create a list to store the plots
 plot_list <- list()
 
+# load file
+DIA_raw <- read_protti(input_file)
+
 # ------------------------------------------------------------------------------
 # Preprocessing 
 # ------------------------------------------------------------------------------
 
-DIA_raw$intensity_log2 <- log2(DIA_raw$fg_ms2raw_quantity)
+DIA_raw$intensity_log2 <- log2(DIA_raw$fg_quantity)
 
 DIA_raw_norm <- protti::normalise(
   DIA_raw,
@@ -123,7 +126,7 @@ uniprot <- # download protein information from UniProt
   ) 
 
 DIA_clean_uniprot <- DIA_clean %>%
-  left_join(uniprot, by = c("pg_protein_accessions" = "accession")) %>% # rejoin with annotations
+  left_join(uniprot, by = c("pg_protein_accessions" = "accession")) %>% 
   find_peptide(sequence, pep_stripped_sequence) %>%
   assign_peptide_type(aa_before, last_aa, aa_after) %>%
   distinct()
@@ -145,7 +148,7 @@ imputed <- impute_randomforest(
   r_file_name,
   fg_id,
   normalised_intensity_log2,
-  retain_columns = names(DIA_clean_uniprot),
+  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions", "gene_names", "go_f", "r_condition"),
   parallelize = "variables"
 )
 
@@ -162,7 +165,7 @@ DIA_clean_uniprot_summed_protti <- calculate_protein_abundance(
   min_n_peptides = 1,
   method = "sum",
   for_plot = FALSE,
-  retain_columns = names(DIA_clean_uniprot)
+  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions", "gene_names", "go_f", "r_condition")
 )
 
 # ------------------------------------------------------------------------------
@@ -309,15 +312,15 @@ plot_list[[12]] <- qc_sample_correlation(
 
 # Data analysis
 ## Volcano plots peptide lvl
-Volcano_input <- unique_pep_filt %>%
+Volcano_input <- DIA_clean_uniprot_summed_protti %>%
   unique() %>%
   assign_missingness(
     r_file_name,
     r_condition,
     pep_stripped_sequence,
     normalised_intensity_log2,
-    ref_condition = ref_condition, # cannot be hardcoded
-    retain_columns = c(pg_protein_accessions, pep_stripped_sequence, start, end, pep_type, sequence, length))
+    ref_condition = ref_condition, 
+    retain_columns = c(pg_protein_accessions, pep_stripped_sequence, go_f))
 
 Volcano_input = Volcano_input %>%
   dplyr::filter(is.na(sequence)== F)
@@ -331,24 +334,27 @@ df_diff_abundance <- calculate_diff_abundance(
   normalised_intensity_log2,
   missingness,
   comparison = comparison,
-  ref_condition = ref_condition, # cannot be hardcoded 
+  ref_condition = ref_condition, 
   method = "moderated_t-test",
-  retain_columns = c(pg_protein_accessions, pep_stripped_sequence, start, end, pep_type, sequence, length, comparison))
+  retain_columns = c(pg_protein_accessions, pep_stripped_sequence, comparison, go_f))
 
 # ------------------------------------------------------------------------------
 # GO terms
 # ------------------------------------------------------------------------------
 
-go <- fetch_go(taxonomy_id)
+df_diff_abundance_significant <- df_diff_abundance %>%
+  dplyr::mutate(significant = ifelse(adj_pval < 0.05, TRUE, FALSE)) %>%
+  dplyr::filter(!is.na(go_f), !is.na(significant))
 
 df_go_term <- calculate_go_enrichment(
-  data,
-  protein_id = accession,
+  data = df_diff_abundance_significant,
+  protein_id = pg_protein_accessions,
   go_annotations_uniprot = go_f,
   is_significant = significant,
   plot = FALSE,
   plot_cutoff = "pval 0.01"
 )
+
 
 # ------------------------------------------------------------------------------
 # Save everything 
