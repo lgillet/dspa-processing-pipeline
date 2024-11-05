@@ -322,8 +322,8 @@ Volcano_input <- DIA_clean_uniprot_summed_protti %>%
     ref_condition = ref_condition, 
     retain_columns = c(pg_protein_accessions, pep_stripped_sequence, go_f))
 
-Volcano_input = Volcano_input %>%
-  dplyr::filter(is.na(sequence)== F)
+#Volcano_input = Volcano_input %>%
+ # dplyr::filter(is.na(sequence)== F)
 
 #differential analysis
 df_diff_abundance <- calculate_diff_abundance(
@@ -361,24 +361,24 @@ df_go_term <- calculate_go_enrichment(
 # ------------------------------------------------------------------------------
 
 # Save QC plots
-output_qc_pdf <- file.path(output_dir, experiment_folder, "qc_plots.pdf")
+output_qc_pdf <- file.path(experiment_folder_path, "qc_plots.pdf")
 pdf(output_qc_pdf, width = 7, height = 5)  # Open the PDF device
 # Loop through the list and print each ggplot object
 lapply(plot_list, print)
 dev.off()  
 
 # Save Differential Abundance 
-differential_abundance_file_path <- file.path(output_dir, experiment_folder, "differential_abundance.csv")
+differential_abundance_file_path <- file.path(experiment_folder_path, "differential_abundance.csv")
 write.csv(df_diff_abundance, differential_abundance_file_path)
 
 # Save GO Term
-go_term_file_path <- file.path(output_dir, experiment_folder, "go_term.csv")
+go_term_file_path <- file.path(experiment_folder_path, "go_term.csv")
 write.csv(df_go_term, go_term_file_path)
 
 # saving a file with the metadata for the experiment would be great as well 
 
 # copy yaml file into the output as well
-yaml_file_path <- file.path(output_dir, experiment_folder, "params.yaml")
+yaml_file_path <- file.path(experiment_folder_path, "params.yaml")
 file.copy("param_files/params_LIP00010.yaml", yaml_file_path)
 
 # Stop redirecting output to the log file
