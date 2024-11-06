@@ -33,45 +33,47 @@ library(dplyr)
 library(missForest)
 library(doParallel)
 
-registerDoParallel(cores = 6)
+registerDoParallel(cores = 4) 
 
 # Read the YAML file
-params <- yaml::read_yaml("param_files/params_LIP00010.yaml")
+args <- commandArgs(trailingOnly = TRUE)
+# Expect the first argument to be the path to the YAML file
+yaml_file <- args[1]
+params <- yaml::read_yaml(yaml_file)
 
 # Access the parameters
+group_id <- params$group_id
 input_file <- params$input_file
 experiment_id <- params$experiment_id
 treatment <- params$treatment
-dose <- params$dose
 ref_condition <- params$ref_condition
 comparison <- params$comparison
 #taxonomy_id <- params$taxonomy_id
 output_dir <- params$output_dir
 
 
-experiment_folder_path <- file.path(output_dir, experiment_id)
+group_folder_path <- file.path(output_dir, group_id)
 
 if (!dir.exists("./preprocessed")) {
   dir.create("./preprocessed", recursive = TRUE)
 }
 
 # Now create the experiment folder
-if (!dir.exists(experiment_folder_path)) {
-  dir.create(experiment_folder_path, recursive = TRUE)
-  cat("Created experiment folder:", experiment_folder_path, "\n")
+if (!dir.exists(group_folder_path)) {
+  dir.create(group_folder_path, recursive = TRUE)
+  cat("Created group folder:", group_folder_path, "\n")
 }
 
 
 # Log outputs to check for errors 
 # Redirect output to a log file
-logfile_dir <- file.path(output_dir, experiment_id, "processing_log.txt")
+logfile_dir <- file.path(output_dir, group_id, "processing_log.txt")
 sink(logfile_dir, append = TRUE)
 
 # Print or use the parameters
 print(paste("Input File:", input_file))
 print(paste("Experiment ID:", experiment_id))
 print(paste("Treatment:", treatment))
-print(paste("Dose:", dose))
 print(paste("Ref Condtion:", ref_condition))
 print(paste("Output Directory:", output_dir))
 
@@ -111,7 +113,7 @@ unis <- unique(DIA_clean$pg_protein_accessions) # make vector for fetch_uniprot
 
 ## Load data from uniprot and join with DIA dataframe
 uniprot <- # download protein information from UniProt
-  fetch_uniprot(
+  protti::fetch_uniprot(
     unis,
     columns =  c(
       "protein_name",
@@ -145,17 +147,17 @@ proteins_identified <- uniprot %>%
 ##Imputation on precursor lvl 
 imputed <- impute_randomforest(
   DIA_clean_uniprot,
-  r_file_name,
-  fg_id,
-  normalised_intensity_log2,
-  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions", "gene_names", "go_f", "r_condition"),
+  sample = r_file_name,
+  grouping = fg_id,
+  intensity_log2 = normalised_intensity_log2,
+  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions", "gene_names", "go_f", "r_condition", "start", "end"),
   parallelize = "variables"
 )
 
 ##sum up precursors to peptide lvl and keep only one entry per pep_stripped_sequence
 ###code here needs to be adjusted for protti function
 
-DIA_clean_uniprot_summed_protti <- calculate_protein_abundance(
+DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
   imputed,
   sample = r_file_name,
   protein_id = pep_stripped_sequence,
@@ -165,18 +167,18 @@ DIA_clean_uniprot_summed_protti <- calculate_protein_abundance(
   min_n_peptides = 1,
   method = "sum",
   for_plot = FALSE,
-  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions", "gene_names", "go_f", "r_condition")
+  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions", "gene_names", "go_f", "r_condition", "start", "end")
 )
 
 # ------------------------------------------------------------------------------
 # QC
 # ------------------------------------------------------------------------------
 
-plot_list[[1]] <- qc_median_intensities(
-  DIA_raw_norm,
-  r_file_name,
-  pep_grouping_key,
-  normalised_intensity_log2,
+plot_list[[1]] <- protti::qc_median_intensities(
+  data = DIA_raw_norm,
+  sample = r_file_name,
+  grouping = pep_grouping_key,
+  intensity = normalised_intensity_log2,
   plot = TRUE,
   interactive = FALSE
 )
@@ -184,7 +186,7 @@ plot_list[[1]] <- qc_median_intensities(
 #QC
 
 ##CV
-plot_list[[2]] <- qc_cvs(
+plot_list[[2]] <- protti::qc_cvs(
   data = DIA_clean_uniprot,
   grouping = fg_id,
   condition = r_condition,
@@ -192,7 +194,7 @@ plot_list[[2]] <- qc_cvs(
   plot = FALSE
 )
 
-plot_list[[3]] <- qc_cvs(
+plot_list[[3]] <- protti::qc_cvs(
   data = DIA_clean_uniprot,
   grouping = fg_id,
   condition = r_condition,
@@ -201,7 +203,7 @@ plot_list[[3]] <- qc_cvs(
   plot = TRUE
 )
 
-plot_list[[4]] <- qc_cvs(
+plot_list[[4]] <- protti::qc_cvs(
   data = DIA_clean_uniprot,
   grouping = fg_id,
   condition = r_condition,
@@ -213,32 +215,32 @@ plot_list[[4]] <- qc_cvs(
 ## Intensity distribution
 #Intensity distributions are plotted for the whole dataset.
 
-plot_list[[5]] <- qc_intensity_distribution(
-  DIA_clean_uniprot,
-  condrep,
-  pep_grouping_key,
-  intensity_log2,
+plot_list[[5]] <- protti::qc_intensity_distribution(
+  data = DIA_clean_uniprot,
+  sample = condrep,
+  grouping = pep_grouping_key,
+  intensity_log2 = intensity_log2,
   plot_style = "histogram"
 )
 
 ## Missed cleavages
-plot_list[[6]] <- qc_missed_cleavages(
-  DIA_clean_uniprot,
-  condrep,
-  fg_id,
-  pep_nr_of_missed_cleavages,
-  fg_quantity,
+plot_list[[6]] <- protti::qc_missed_cleavages(
+  data = DIA_clean_uniprot,
+  sample = condrep,
+  grouping = fg_id,
+  missed_cleavages = pep_nr_of_missed_cleavages,
+  intensity = fg_quantity,
   method = "intensity",
   plot = TRUE,
   interactive = FALSE
 )
 
-plot_list[[7]] <- qc_missed_cleavages(
-  DIA_clean_uniprot,
-  condrep,
-  fg_id,
-  pep_nr_of_missed_cleavages,
-  fg_quantity,
+plot_list[[7]] <- protti::qc_missed_cleavages(
+  data = DIA_clean_uniprot,
+  sample = condrep,
+  grouping = fg_id,
+  missed_cleavages = pep_nr_of_missed_cleavages,
+  intensity = fg_quantity,
   method = "count",
   plot = TRUE,
   interactive = FALSE
@@ -277,9 +279,9 @@ plot_list[[9]] <- qc_peptide_type(
 DIA_raw$condrep <- paste(DIA_raw$r_condition, DIA_raw$r_replicate, sep = "_")
 
 plot_list[[10]] <- qc_ids(
-  DIA_raw, 
-  condrep, 
-  pep_grouping_key, 
+  data = DIA_raw, 
+  sample = condrep, 
+  grouping = pep_grouping_key, 
   condition = r_condition, 
   intensity = fg_quantity
 )
@@ -287,10 +289,10 @@ plot_list[[10]] <- qc_ids(
 ## Principal component analysis (PCA)
 plot_list[[11]] <-DIA_clean_uniprot %>%
   qc_pca(
-    condrep, 
-    pep_grouping_key, 
-    intensity_log2, 
-    r_condition
+    sample = condrep, 
+    grouping = pep_grouping_key, 
+    intensity = intensity_log2, 
+    condition = r_condition
   )
 
 ## corelation_map
@@ -310,50 +312,63 @@ plot_list[[12]] <- qc_sample_correlation(
 # differential abundance
 # ------------------------------------------------------------------------------
 
+Volcano_input <- DIA_clean_uniprot %>%
+  unique() %>%
+  protti::assign_missingness(
+    sample = r_file_name,
+    condition = r_condition,
+    grouping = pep_stripped_sequence,
+    intensity = normalised_intensity_log2,
+    ref_condition = ref_condition,
+    retain_columns = c(pg_protein_accessions, pep_stripped_sequence, go_f, start, end)
+  )
+
+df_diff_abundance <- protti::calculate_diff_abundance(
+  data = Volcano_input,
+  r_file_name = r_file_name,
+  r_condition = r_condition,
+  protein_id = pep_stripped_sequence,
+  intensity_log2 = normalised_intensity_log2,
+  missingness = missingness,
+  ref_condition = ref_condition,
+  method = "moderated_t-test",
+  retain_columns = c(pg_protein_accessions, pep_stripped_sequence, comparison, go_f, start, end)
+)
+
 # Data analysis
 ## Volcano plots peptide lvl
-Volcano_input <- DIA_clean_uniprot_summed_protti %>%
-  unique() %>%
-  assign_missingness(
-    r_file_name,
-    r_condition,
-    pep_stripped_sequence,
-    normalised_intensity_log2,
-    ref_condition = ref_condition, 
-    retain_columns = c(pg_protein_accessions, pep_stripped_sequence, go_f))
+# Iterate over each comparison and associated experiment ID
+for (i in seq_along(comparisons)) {
+  comparison_filter <- comparisons[[i]]
+  experiment_id <- experiment_ids[[i]]
 
-#Volcano_input = Volcano_input %>%
- # dplyr::filter(is.na(sequence)== F)
+  # Subset data for the specific comparison
+  df_diff_abundance_subset <- df_diff_abundance %>%
+    dplyr::filter(comparison == comparison_filter)
 
-#differential analysis
-df_diff_abundance <- calculate_diff_abundance(
-  data = Volcano_input,
-  r_file_name,
-  r_condition,
-  pep_stripped_sequence,
-  normalised_intensity_log2,
-  missingness,
-  comparison = comparison,
-  ref_condition = ref_condition, 
-  method = "moderated_t-test",
-  retain_columns = c(pg_protein_accessions, pep_stripped_sequence, comparison, go_f))
-
-# ------------------------------------------------------------------------------
-# GO terms
-# ------------------------------------------------------------------------------
-
-df_diff_abundance_significant <- df_diff_abundance %>%
-  dplyr::mutate(significant = ifelse(adj_pval < 0.05, TRUE, FALSE)) %>%
-  dplyr::filter(!is.na(go_f), !is.na(significant))
-
-df_go_term <- calculate_go_enrichment(
-  data = df_diff_abundance_significant,
-  protein_id = pg_protein_accessions,
-  go_annotations_uniprot = go_f,
-  is_significant = significant,
-  plot = FALSE,
-  plot_cutoff = "pval 0.01"
-)
+  # Save Differential Abundance results
+  diff_abundance_file <- file.path(group_folder_path, paste0("differential_abundance_", experiment_id, "_", comparison, ".csv"))
+  write.csv(df_diff_abundance_subset, diff_abundance_file)
+  
+  # Filter significant proteins for GO term analysis
+  df_diff_abundance_significant <- df_diff_abundance_subset %>%
+    dplyr::mutate(significant = ifelse(adj_pval < 0.05, TRUE, FALSE)) %>%
+    dplyr::filter(!is.na(go_f), significant == TRUE)
+  
+  # Calculate GO term enrichment for the current comparison
+  df_go_term <- protti::calculate_go_enrichment(
+    data = df_diff_abundance_significant,
+    protein_id = pg_protein_accessions,
+    go_annotations_uniprot = go_f,
+    is_significant = significant,
+    plot = FALSE,
+    plot_cutoff = "pval 0.01"
+  )
+  
+  # Save GO Term enrichment results
+  go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison, ".csv"))
+  write.csv(df_go_term, go_term_file)
+}
 
 
 # ------------------------------------------------------------------------------
@@ -361,25 +376,17 @@ df_go_term <- calculate_go_enrichment(
 # ------------------------------------------------------------------------------
 
 # Save QC plots
-output_qc_pdf <- file.path(experiment_folder_path, "qc_plots.pdf")
+output_qc_pdf <- file.path(group_folder_path, "qc_plots.pdf")
 pdf(output_qc_pdf, width = 7, height = 5)  # Open the PDF device
 # Loop through the list and print each ggplot object
 lapply(plot_list, print)
 dev.off()  
 
-# Save Differential Abundance 
-differential_abundance_file_path <- file.path(experiment_folder_path, "differential_abundance.csv")
-write.csv(df_diff_abundance, differential_abundance_file_path)
-
-# Save GO Term
-go_term_file_path <- file.path(experiment_folder_path, "go_term.csv")
-write.csv(df_go_term, go_term_file_path)
-
 # saving a file with the metadata for the experiment would be great as well 
 
 # copy yaml file into the output as well
-yaml_file_path <- file.path(experiment_folder_path, "params.yaml")
-file.copy("param_files/params_LIP00010.yaml", yaml_file_path)
+yaml_file_path <- file.path(group_folder_path, "params.yaml")
+file.copy(yaml_file, yaml_file_path)
 
 # Stop redirecting output to the log file
 sink()
