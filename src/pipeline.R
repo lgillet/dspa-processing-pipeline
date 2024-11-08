@@ -146,7 +146,7 @@ proteins_identified <- uniprot %>%
 
 ##Imputation on precursor lvl 
 imputed <- impute_randomforest(
-  DIA_clean_uniprot %>% head(10000),
+  DIA_clean_uniprot,
   sample = r_file_name,
   grouping = fg_id,
   intensity_log2 = normalised_intensity_log2,
