@@ -44,10 +44,10 @@ params <- yaml::read_yaml(yaml_file)
 # Access the parameters
 group_id <- params$group_id
 input_file <- params$input_file
-experiment_id <- params$experiment_id
+experiment_ids <- params$experiment_id
 treatment <- params$treatment
 ref_condition <- params$ref_condition
-comparison <- params$comparison
+comparisons <- params$comparison
 #taxonomy_id <- params$taxonomy_id
 output_dir <- params$output_dir
 
@@ -72,7 +72,7 @@ sink(logfile_dir, append = TRUE)
 
 # Print or use the parameters
 print(paste("Input File:", input_file))
-print(paste("Experiment ID:", experiment_id))
+print(paste("Experiment IDs:", experiment_ids))
 print(paste("Treatment:", treatment))
 print(paste("Ref Condtion:", ref_condition))
 print(paste("Output Directory:", output_dir))
@@ -146,7 +146,7 @@ proteins_identified <- uniprot %>%
 
 ##Imputation on precursor lvl 
 imputed <- impute_randomforest(
-  DIA_clean_uniprot,
+  DIA_clean_uniprot %>% head(10000),
   sample = r_file_name,
   grouping = fg_id,
   intensity_log2 = normalised_intensity_log2,
@@ -312,35 +312,43 @@ plot_list[[12]] <- qc_sample_correlation(
 # differential abundance
 # ------------------------------------------------------------------------------
 
-Volcano_input <- DIA_clean_uniprot %>%
-  unique() %>%
-  protti::assign_missingness(
-    sample = r_file_name,
-    condition = r_condition,
-    grouping = pep_stripped_sequence,
-    intensity = normalised_intensity_log2,
-    ref_condition = ref_condition,
-    retain_columns = c(pg_protein_accessions, pep_stripped_sequence, go_f, start, end)
-  )
-
-df_diff_abundance <- protti::calculate_diff_abundance(
-  data = Volcano_input,
-  r_file_name = r_file_name,
-  r_condition = r_condition,
-  protein_id = pep_stripped_sequence,
-  intensity_log2 = normalised_intensity_log2,
-  missingness = missingness,
-  ref_condition = ref_condition,
-  method = "moderated_t-test",
-  retain_columns = c(pg_protein_accessions, pep_stripped_sequence, comparison, go_f, start, end)
-)
-
 # Data analysis
 ## Volcano plots peptide lvl
 # Iterate over each comparison and associated experiment ID
 for (i in seq_along(comparisons)) {
   comparison_filter <- comparisons[[i]]
   experiment_id <- experiment_ids[[i]]
+  
+  comparison_parts <- strsplit(comparison_filter, "_vs_")[[1]] 
+  
+  filtered_data <- DIA_clean_uniprot_summed_protti %>%
+    dplyr::filter(r_condition %in% comparison_parts)
+  
+  Volcano_input <- filtered_data %>%
+    unique() %>%
+    protti::assign_missingness(
+      sample = r_file_name,
+      condition = r_condition,
+      grouping = pep_stripped_sequence,
+      intensity = normalised_intensity_log2,
+      ref_condition = ref_condition,
+      retain_columns = all_of(c("pg_protein_accessions", "r_file_name", "r_condition", 
+                                "normalised_intensity_log2", 
+                                  "pep_stripped_sequence", "go_f", "start", "end"))
+    )
+  
+  df_diff_abundance <- protti::calculate_diff_abundance(
+    data = Volcano_input,
+    sample = r_file_name,
+    condition = r_condition,
+    grouping = pep_stripped_sequence,
+    intensity_log2 = normalised_intensity_log2,
+    missingness = missingness,
+    comparison = comparison,
+    method = "moderated_t-test",
+    retain_columns = all_of(c("pg_protein_accessions", "pep_stripped_sequence", 
+                              "comparison", "go_f", "start", "end"))
+  )
 
   # Subset data for the specific comparison
   df_diff_abundance_subset <- df_diff_abundance %>%
