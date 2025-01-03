@@ -355,6 +355,30 @@ for (i in seq_along(comparisons)) {
 # ------------------------------------------------------------------------------
 
 # if tryptic control present
+# Tryptic Control (if provided)
+if (!is.null(input_file_tryptic_control)) {
+  tryptic_control_data <- protti::read_protti(input_file_tryptic_control)
+  tryptic_control_data$intensity_log2 <- log2(tryptic_control_data$pg_quantity)
+  
+  # Preprocess tryptic control data
+  tryptic_clean <- tryptic_control_data %>%
+    filter(intensity_log2 > 10, pep_is_proteotypic == TRUE) %>%
+    protti::normalise(
+      sample = r_file_name,
+      intensity_log2 = intensity_log2,
+      method = "median"
+    )
+  
+  # Fetch UniProt annotations for tryptic control
+  unis_tryptic <- unique(tryptic_clean$pg_protein_accessions)
+  uniprot_tryptic <- protti::fetch_uniprot(unis_tryptic, columns = c("protein_name", "gene_names", "length"))
+  
+  tryptic_clean_uniprot <- tryptic_clean %>%
+    left_join(uniprot_tryptic, by = c("pg_protein_accessions" = "accession"))
+  
+  # Save preprocessed tryptic control data
+  write.csv(tryptic_clean_uniprot, file.path(group_folder_path, "tryptic_control_clean.csv"))
+}
 
 
 # copy yaml file into the output as well
