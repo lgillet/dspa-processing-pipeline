@@ -347,6 +347,46 @@ for (i in seq_along(comparisons)) {
   })
 }
 
+# ------------------------------------------------------------------------------
+# LiP-Quant Analysis
+# ------------------------------------------------------------------------------
+# Adding dose-response analysis using `parallel_fit_drc_4p`
+
+# Ensure a numeric concentration column exists for dose-response fitting
+DIA_clean_uniprot_summed_protti$conc_frag <- as.numeric(gsub("_mM", "", DIA_clean_uniprot_summed_protti$r_condition))
+
+# Perform parallel dose-response fitting
+lipquant_results <- protti::parallel_fit_drc_4p(
+  data = DIA_clean_uniprot_summed_protti,
+  sample = r_file_name,
+  grouping = pep_stripped_sequence,
+  intensity_log2 = normalised_intensity_log2,
+  conc_frag = conc_frag,
+  filter = "post",
+  replicate_completeness = 0.7,
+  condition_completeness = 0.5,
+  correlation_cutoff = 0.8,
+  log_logarithmic = TRUE,
+  retain_columns = c("pg_protein_accessions", "start", "end", "pep_type", "gene_names", "go_f")
+)
+
+# Save LiP-Quant results
+lipquant_output_file <- file.path(group_folder_path, "lipquant_results.csv")
+write.csv(lipquant_results, lipquant_output_file)
+
+
+lipquant_plots <- protti::plot_drc_results(
+  lipquant_results,
+  grouping = pep_stripped_sequence,
+  conc_frag = conc_frag,
+  intensity_log2 = normalised_intensity_log2
+)
+
+# Save diagnostic plots for dose-response fitting
+lipquant_plot_pdf <- file.path(group_folder_path, "lipquant_dose_response_plots.pdf")
+pdf(lipquant_plot_pdf, width = 7, height = 5)
+lapply(lipquant_plots, print)
+dev.off()
 
 
 # ------------------------------------------------------------------------------
