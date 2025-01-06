@@ -84,8 +84,7 @@ DIA_raw_norm <- protti::normalise(
 )
 
 DIA_clean <- DIA_raw_norm %>%
-  dplyr::filter(intensity_log2 > 10) %>%
-  dplyr::filter(pep_is_proteotypic == T)
+  dplyr::filter(intensity_log2 > 10) 
 
 DIA_clean$fg_id <- paste0(DIA_clean$fg_labeled_sequence, DIA_clean$fg_charge)
 unis <- unique(DIA_clean$pg_protein_accessions) # make vector for fetch_uniprot
@@ -362,7 +361,7 @@ if (!is.null(input_file_tryptic_control)) {
   
   # Preprocess tryptic control data
   tryptic_clean <- tryptic_control_data %>%
-    filter(intensity_log2 > 10, pep_is_proteotypic == TRUE) %>%
+   dplyr::filter(intensity_log2 > 10) %>%
     protti::normalise(
       sample = r_file_name,
       intensity_log2 = intensity_log2,
