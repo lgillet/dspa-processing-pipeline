@@ -14,7 +14,6 @@ args <- commandArgs(trailingOnly = TRUE)
 # Expect the first argument to be the path to the YAML file
 yaml_file <- args[1]
 params <- yaml::read_yaml(yaml_file)
-params <- yaml::read_yaml("params.yaml")
 
 # Access the parameters
 group_id <- params$group_id
@@ -74,7 +73,7 @@ DIA_raw <- read_protti(input_file)
 # Preprocessing 
 # ------------------------------------------------------------------------------
 
-DIA_raw$intensity_log2 <- log2(DIA_raw$fg_quantity)
+DIA_raw$intensity_log2 <- log2(DIA_raw$fg_m2raw_quantity)
 DIA_raw$condrep <- paste(DIA_raw$r_condition, DIA_raw$r_replicate, sep = "_")
 
 DIA_raw_norm <- protti::normalise(
