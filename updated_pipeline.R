@@ -14,6 +14,7 @@ args <- commandArgs(trailingOnly = TRUE)
 # Expect the first argument to be the path to the YAML file
 yaml_file <- args[1]
 params <- yaml::read_yaml(yaml_file)
+params <- yaml::read_yaml("params.yaml")
 
 # Access the parameters
 group_id <- params$group_id
