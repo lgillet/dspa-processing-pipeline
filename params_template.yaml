@@ -2,7 +2,7 @@
 group_id: ""
 experiment_id: [""]
 input_file: ""
-input_file_tryptic_control: ""
+input_file_tryptic_control: null
 treatment: ""
 output_dir: "./preprocessed"
 ref_condition: "CTR"

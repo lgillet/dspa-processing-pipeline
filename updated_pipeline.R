@@ -73,7 +73,7 @@ DIA_raw <- read_protti(input_file)
 # Preprocessing 
 # ------------------------------------------------------------------------------
 
-DIA_raw$intensity_log2 <- log2(DIA_raw$fg_m2raw_quantity)
+DIA_raw$intensity_log2 <- log2(DIA_raw$fg_ms2raw_quantity)
 DIA_raw$condrep <- paste(DIA_raw$r_condition, DIA_raw$r_replicate, sep = "_")
 
 DIA_raw_norm <- protti::normalise(
@@ -216,7 +216,7 @@ plot_list[[7]] <- protti::qc_missed_cleavages(
   interactive = FALSE
 )
 
-plot_list[[8]] <- qc_peptide_type(
+plot_list[[8]] <- protti::qc_peptide_type(
   DIA_clean_uniprot,
   condrep,
   fg_id,
@@ -227,7 +227,7 @@ plot_list[[8]] <- qc_peptide_type(
   interactive = FALSE
 )
 
-plot_list[[9]] <- qc_peptide_type(
+plot_list[[9]] <- protti::qc_peptide_type(
   DIA_clean_uniprot,
   condrep,
   fg_id,
@@ -238,7 +238,7 @@ plot_list[[9]] <- qc_peptide_type(
   interactive = FALSE
 )
 
-plot_list[[10]] <- qc_ids(
+plot_list[[10]] <- protti::qc_ids(
   data = DIA_raw, 
   sample = condrep, 
   grouping = pep_grouping_key, 
@@ -248,7 +248,7 @@ plot_list[[10]] <- qc_ids(
 
 ## Principal component analysis (PCA)
 plot_list[[11]] <-DIA_clean_uniprot %>%
-  qc_pca(
+  protti::qc_pca(
     sample = condrep, 
     grouping = pep_grouping_key, 
     intensity = intensity_log2, 
@@ -256,7 +256,7 @@ plot_list[[11]] <-DIA_clean_uniprot %>%
   )
 
 ## corelation_map
-plot_list[[12]] <- qc_sample_correlation(
+plot_list[[12]] <- protti::qc_sample_correlation(
   data = DIA_clean_uniprot,
   sample = r_file_name,
   grouping = fg_id,
