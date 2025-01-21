@@ -1,3 +1,6 @@
+# From Ludo: 
+# this is a test modification note to see whether my fork is working correctly
+
 # load arguments
 # use bash: Rscript pipeline.R params.yaml
 
