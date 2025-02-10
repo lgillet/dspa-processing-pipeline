@@ -20,10 +20,12 @@ yaml_file <- args[1]
 params <- yaml::read_yaml(yaml_file)
 
 #####
-# debugging: load the files manually: 
-# setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-# yaml_file <- "params_template.yaml"
-# params <- yaml::read_yaml(yaml_file)
+# debugging: load the files manually and fix the OSX path to Windows:
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+yaml_file <- "params_GRP000002.yaml"
+params <- yaml::read_yaml("./params_GRP000002.yaml")
+params <- lapply(params, function(x) gsub("/Volumes/biol_bc_picotti_1/", "Y:/", x, fixed = FALSE))
+params$output_dir <- paste(params$output_dir, "_ludo", sep = "")
 #####
 
 # bug: insert an extra return at the end of the yaml file otherwise get a warning: 
@@ -40,12 +42,6 @@ ref_condition <- params$ref_condition
 comparisons <- params$comparison
 output_dir <- params$output_dir
 
-#####
-# debugging: fix the OSX path to Windows:
-# input_file <- gsub("/Volumes/biol_bc_picotti_1/", "Y:/", input_file, fixed = FALSE)
-# input_file_tryptic_control <- gsub("/Volumes/biol_bc_picotti_1/", "Y:/", input_file_tryptic_control, fixed = FALSE)
-# output_dir <- paste(output_dir, "_ludo", sep = "")
-#####
 
 if (!is.null(params$input_file_tryptic_control)) {
   input_file_tryptic_control <- params$input_file_tryptic_control
@@ -173,7 +169,7 @@ save.image("./all_data.RData")
 # load("./all_data.RData")
 
 # sum up precursors to peptide level and keep only one entry per pep_stripped_sequence
-# bug: do not lump to the stripped_peptide_sequence but rather to the modified_peptide_sequence
+# bug: do not lump to the stripped_peptide_sequence but rather to the modified_peptide_sequence; remove accordingly "pep_stripped_sequemce" from the retained columns
 DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
   imputed,
   sample = r_file_name,
@@ -184,7 +180,7 @@ DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
   min_n_peptides = 1,
   method = "sum",
   for_plot = FALSE,
-  retain_columns = c("pep_stripped_sequence", "pg_protein_accessions",
+  retain_columns = c("pg_protein_accessions",
                      "gene_names", "go_f", "r_condition", "start", "end")
 )
 
@@ -389,6 +385,9 @@ ggsave(
 # Data analysis
 ## Volcano plots peptide level
 # Iterate over each comparison and associated experiment ID
+
+# bug: replace pep_stripped_sequence by eg_modified_peptide
+
 for (i in seq_along(comparisons)) {
   comparison_filter <- comparisons[[i]]
   experiment_id <- experiment_ids[[i]]
@@ -404,24 +403,24 @@ for (i in seq_along(comparisons)) {
     protti::assign_missingness(
       sample = r_file_name,
       condition = r_condition,
-      grouping = pep_stripped_sequence,
+      grouping = eg_modified_peptide,
       intensity = normalised_intensity_log2,
       ref_condition = ref_condition,
       retain_columns = all_of(c("pg_protein_accessions", "r_file_name", "r_condition", 
                                 "normalised_intensity_log2", 
-                                "pep_stripped_sequence", "go_f", "start", "end"))
+                                "go_f", "start", "end"))
     )
   
   df_diff_abundance <- protti::calculate_diff_abundance(
     data = Volcano_input,
     sample = r_file_name,
     condition = r_condition,
-    grouping = pep_stripped_sequence,
+    grouping = eg_modified_peptide,
     intensity_log2 = normalised_intensity_log2,
     missingness = missingness,
     comparison = comparison,
     method = "moderated_t-test",
-    retain_columns = all_of(c("pg_protein_accessions", "pep_stripped_sequence", 
+    retain_columns = all_of(c("pg_protein_accessions", "eg_modified_peptide", 
                               "comparison", "go_f", "start", "end"))
   )
 
@@ -435,11 +434,11 @@ for (i in seq_along(comparisons)) {
     dplyr::mutate(label = paste(gene, "@", start, "-", end, sep = "")) %>% 
     dplyr::mutate(significant = TRUE)
     
-  print(paste("Number of significantly changing candidates: ", length(unique(candidates$pep_stripped_sequence)), " peptide(s) belonging to ", length(unique(candidates$pg_protein_accessions)), " protein(s)."), sep = "")
-  print(distinct(candidates, pg_protein_accessions, pep_stripped_sequence, label))
+  print(paste("Number of significantly changing candidates: ", length(unique(candidates$eg_modified_peptide)), " peptide(s) belonging to ", length(unique(candidates$pg_protein_accessions)), " protein(s)."), sep = "")
+  print(distinct(candidates, pg_protein_accessions, eg_modified_peptide, label))
   
   df_diff_abundance <- df_diff_abundance %>%
-    left_join(distinct(candidates, pep_stripped_sequence, label, significant), by = "pep_stripped_sequence") %>% 
+    left_join(distinct(candidates, eg_modified_peptide, label, significant), by = "eg_modified_peptide") %>% 
     left_join(dplyr::distinct(DIA_clean_uniprot, pg_protein_accessions, gene_names, sequence, length, coverage), by = "pg_protein_accessions") %>% 
     rowwise() %>% 
     dplyr::mutate(gene = sort(strsplit(gene_names, " ", fixed = TRUE)[[1]])[1]) 
@@ -456,7 +455,7 @@ for (i in seq_along(comparisons)) {
   # plot the corresponding volcano plots
   plot_list2[[1]] <- volcano_plot(
     data = df_diff_abundance,
-    grouping = pep_stripped_sequence,
+    grouping = eg_modified_peptide,
     log2FC = diff,
     significance = pval,
     method = "significant",
@@ -470,7 +469,7 @@ for (i in seq_along(comparisons)) {
   
   # plot the distribution of the p-values 
   plot_list2[[2]] <- pval_distribution_plot(data = df_diff_abundance,
-                         grouping = pep_stripped_sequence,
+                         grouping = eg_modified_peptide,
                          pval = pval
   )  
   
@@ -486,14 +485,14 @@ for (i in seq_along(comparisons)) {
   candidate_summed <- DIA_clean_uniprot_summed_protti %>% 
     dplyr::filter(pg_protein_accessions %in% sort(unique(candidates$pg_protein_accessions))) %>% 
     left_join(distinct(DIA_clean, r_file_name, condrep), by = "r_file_name") %>% 
-    left_join(distinct(candidates, pep_stripped_sequence, significant), by = "pep_stripped_sequence") %>% 
+    left_join(distinct(candidates, eg_modified_peptide, significant), by = "eg_modified_peptide") %>% 
     dplyr::mutate(significant = ifelse(is.na(significant), FALSE, significant)) %>% 
     dplyr::mutate(line_type = ifelse(significant == TRUE, 'solid', 'dotted'))
       
   plot_list3 <- peptide_profile_plot(
     data = candidate_summed,
     sample = condrep,
-    peptide = pep_stripped_sequence,
+    peptide = eg_modified_peptide,
     intensity_log2 = normalised_intensity_log2,
     grouping = pg_protein_accessions,
     targets = sort(unique(candidates$pg_protein_accessions)),
