@@ -8,6 +8,7 @@ output_dir: "./preprocessed"
 ref_condition: "CTR"
 taxonomy_id: 
 comparison: [""]
+files_to_remove: [""]
 
 
  # Perturbations: "Small molecule", "Environmental Stress", "Metabolic perturbation - Different carbon sources" 
@@ -35,3 +36,4 @@ comparison: [""]
  replicate_number: null
  replicate_type: # "B" for biological, "T" for technical 
  author: ""
+ 
