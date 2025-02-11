@@ -1,14 +1,18 @@
 # params.yaml
-group_id: ""
-experiment_id: [""]
+group_id: "" # "GRP000001"
+experiment_id: 
+ -"" # "LIP000001"
 input_file: ""
 input_file_tryptic_control: null
 treatment: ""
 output_dir: "./preprocessed"
 ref_condition: "CTR"
+ref_condition_trp: " " #  CTR_TrP  
 taxonomy_id: 
-comparison: [""]
-files_to_remove: [""]
+comparison: 
+ -"" # "Rapa_LiP_vs_CTR_LiP"
+files_to_remove: 
+ -"" 
 
 
  # Perturbations: "Small molecule", "Environmental Stress", "Metabolic perturbation - Different carbon sources" 
@@ -17,23 +21,24 @@ files_to_remove: [""]
  condition: ""
  organism: ""
  strain: ""
- instrument: ""
+ instrument: "" # FULL NAME!
  n_files: null
  n_files_trp: null
  experiment: "" # "treated lysate"
  reference_to_protocol: ""
- publication: ""
+ publication: "" # full publucation name
  doi: ""
  search_settings: "default"
  fasta: ""
  data_reanalysis_settings: ""
  path_to_raw_files: ""
- raw_file_name: [""]
+ raw_file_name: 
+  - ""
  digestion_protocol: ""
  e_s_ratio: ""
  pk_digestion_time: null
- protease: ""
+ protease: "" # Proteinase K
  replicate_number: null
  replicate_type: # "B" for biological, "T" for technical 
- author: ""
+ author: "" # Full name
  
