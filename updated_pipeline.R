@@ -19,18 +19,6 @@ args <- commandArgs(trailingOnly = TRUE)
 yaml_file <- args[1]
 params <- yaml::read_yaml(yaml_file)
 
-#####
-# debugging: load the files manually and fix the OSX path to Windows:
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-yaml_file <- "params_GRP000002.yaml"
-params <- yaml::read_yaml("./params_GRP000002.yaml")
-params <- lapply(params, function(x) gsub("/Volumes/biol_bc_picotti_1/", "Y:/", x, fixed = FALSE))
-params$output_dir <- paste(params$output_dir, "_ludo", sep = "")
-#####
-
-# bug: insert an extra return at the end of the yaml file otherwise get a warning: 
-# In readLines(file, warn = readLines.warn) :
-# incomplete final line found on 'params_template.yaml'
 
 # Access the parameters
 group_id <- params$group_id
@@ -53,7 +41,6 @@ if (!is.null(params$input_file_tryptic_control)) {
 
 group_folder_path <- file.path(output_dir, group_id)
 
-# bug: adapted "./preprocessed" to output_dir
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
@@ -106,7 +93,6 @@ DIA_raw_norm <- protti::normalise(
   method = "median"
 )
 
-# bug: included parsing of the protein accession when more than 1 to return the first one alphabetically (to help fetch_uniprot) 
 DIA_clean <- DIA_raw_norm %>%
   dplyr::filter(intensity_log2 > 10) %>% 
   dplyr::rowwise() %>% 
@@ -140,16 +126,7 @@ DIA_clean_uniprot <- DIA_clean %>%
   calculate_sequence_coverage(protein_sequence = sequence, peptides = pep_stripped_sequence) %>% 
   dplyr::mutate(normalised_intensity = 2^normalised_intensity_log2)
 
-# bug: removed the following 2 lines: conrep already in those dataframes
-# DIA_clean_uniprot$condrep <- paste(DIA_clean_uniprot$r_condition, DIA_clean_uniprot$r_replicate, sep = "_")
-# DIA_raw$condrep <- paste(DIA_raw$r_condition, DIA_raw$r_replicate, sep = "_")
 
-# bug: removed the following 2 lines: not used afterwards
-# proteins_identified <- uniprot %>%
-#   distinct(accession)
-
-# Imputation on precursor level 
-# BUG: imputation incomplete since started from the dataframe with incomplete/missing rows => complete first!!
 DIA_clean_uniprot_complete <- DIA_clean_uniprot %>% 
   distinct(r_file_name, fg_id, normalised_intensity_log2, eg_modified_peptide, pep_stripped_sequence, pg_protein_accessions, gene_names, go_f, r_condition, start, end) %>% 
   tidyr::complete(nesting(r_file_name, r_condition), nesting(pg_protein_accessions, gene_names, go_f, fg_id, eg_modified_peptide, pep_stripped_sequence, start, end))
@@ -164,12 +141,12 @@ imputed <- impute_randomforest(
   parallelize = "variables"
 )
 
-write.table(imputed, "./preprocessed_ludo/GRP000002/imputed.tsv", sep = "\t", row.names= FALSE, quote = FALSE)
+imputed_file <- file.path(group_folder_path, paste0("imputed.tsv"))
+write.table(imputed, imputed_file, sep = "\t", row.names= FALSE, quote = FALSE)
 save.image("./all_data.RData")
-# load("./all_data.RData")
+
 
 # sum up precursors to peptide level and keep only one entry per pep_stripped_sequence
-# bug: do not lump to the stripped_peptide_sequence but rather to the modified_peptide_sequence; remove accordingly "pep_stripped_sequemce" from the retained columns
 DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
   imputed,
   sample = r_file_name,
@@ -185,7 +162,6 @@ DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
 )
 
 dia_clean_file <- file.path(group_folder_path, paste0("dia_clean_uniprot.tsv"))
-# bug: changed to write.table to remove quotes and row names
 write.csv(DIA_clean_uniprot_summed_protti, dia_clean_file)
 write.table(DIA_clean_uniprot_summed_protti, dia_clean_file, sep = "\t", row.names= FALSE, quote = FALSE)
 
@@ -193,8 +169,6 @@ write.table(DIA_clean_uniprot_summed_protti, dia_clean_file, sep = "\t", row.nam
 # QC plots
 # ------------------------------------------------------------------------------
 
-# bug: for QCs, consider plotting first the plots in the order of processing: DIA_raw first, then DIA_raw_norm and then DIA_clean_uniprot!
-# bug: relabeled the plots accordingly:
 
 plot_list[[1]] <- protti::qc_ids(
   data = DIA_raw, 
@@ -204,7 +178,6 @@ plot_list[[1]] <- protti::qc_ids(
   intensity = fg_quantity
 )+ ggtitle('Precursor ID count per sample')
 
-# bug: added a plot for the number of protein groups
 plot_list[[2]] <- protti::qc_ids(
   data = DIA_raw, 
   sample = condrep, 
@@ -212,35 +185,6 @@ plot_list[[2]] <- protti::qc_ids(
   condition = r_condition, 
   intensity = pg_quantity
 )+ ggtitle('Protein ID count per sample')
-
-# bug: kind of useless: after normalization => flat line?! Consider removing?
-# plot_list[[1]] <- protti::qc_median_intensities(
-#   data = DIA_raw_norm,
-#   sample = r_file_name,
-#   grouping = pep_grouping_key,
-#   intensity = normalised_intensity_log2,
-#   plot = TRUE,
-#   interactive = FALSE
-# )
-
-# bug: this is not a plot but a table => Not super usefull?! Consider removing?
-# plot_list[[2]] <- protti::qc_cvs(
-#   data = DIA_clean_uniprot,
-#   grouping = fg_id,
-#   condition = r_condition,
-#   intensity = fg_quantity,
-#   plot = FALSE
-# )
-
-# bug: Kind of duplicated with the violin plot?! Consider removing?
-# plot_list[[3]] <- protti::qc_cvs(
-#   data = DIA_clean_uniprot,
-#   grouping = fg_id,
-#   condition = r_condition,
-#   intensity = fg_quantity,
-#   plot_style = "density",
-#   plot = TRUE
-# )
 
 plot_list[[3]] <- protti::qc_intensity_distribution(
   data = DIA_raw_norm,
@@ -267,9 +211,7 @@ plot_list[[5]] <- protti::qc_cvs(
   plot = TRUE
 )
 
-
 ## Missed cleavages
-# bug: Swaped the count and intensity to have the plot in the same order as missed cleavages
 plot_list[[6]] <- protti::qc_missed_cleavages(
   data = DIA_clean_uniprot,
   sample = condrep,
@@ -291,7 +233,6 @@ plot_list[[7]] <- protti::qc_missed_cleavages(
   plot = TRUE,
   interactive = FALSE
 )
-
 
 plot_list[[8]] <- protti::qc_peptide_type(
   DIA_clean_uniprot,
@@ -324,9 +265,7 @@ plot_list[[10]] <-DIA_clean_uniprot %>%
     condition = r_condition
   )
 
-## corelation_map
-# bug: replaced r_filename with r_condition for consistency reasons with other plots
-# bug: added [[4]] to get directly the grob from the pheatmap
+## correlation_map
 plot_list[[11]] <- protti::qc_sample_correlation(
   data = DIA_clean_uniprot,
   sample = condrep,
@@ -335,7 +274,6 @@ plot_list[[11]] <- protti::qc_sample_correlation(
   condition = r_condition
 )[[4]]
 
-# bug: added the QC plot to check the intensities before and after imputation
 plot_list[[12]] <- imputed %>%
   dplyr::rename(imputed_intensity_log2 = normalised_intensity_log2) %>% 
   left_join(distinct(DIA_clean_uniprot_complete, r_file_name, fg_id, normalised_intensity_log2), by = c("r_file_name", "fg_id")) %>% 
@@ -360,7 +298,6 @@ plot_list[[12]] <- imputed %>%
   coord_cartesian(xlim = c(5, 30))
 
 # Save QC plots
-# bug: changed to ggsave for cleaner output
 output_qc_pdf <- file.path(group_folder_path, "qc_plots.pdf")
 ggsave(
   filename = output_qc_pdf, 
@@ -368,25 +305,6 @@ ggsave(
   width = 8, height = 6
 )
 
-# output_qc_pdf <- file.path(group_folder_path, "qc_plots.pdf")
-# pdf(output_qc_pdf, width = 9, height = 5)  # Open the PDF device
-# # Loop through the list and print each ggplot object
-# lapply(plot_list, print)
-# dev.off()  
-
-# ------------------------------------------------------------------------------
-# Analysis ...
-# ------------------------------------------------------------------------------
-
-# ------------------------------------------------------------------------------
-# differential abundance and go term
-# ------------------------------------------------------------------------------
-
-# Data analysis
-## Volcano plots peptide level
-# Iterate over each comparison and associated experiment ID
-
-# bug: replace pep_stripped_sequence by eg_modified_peptide
 
 for (i in seq_along(comparisons)) {
   comparison_filter <- comparisons[[i]]
@@ -448,8 +366,7 @@ for (i in seq_along(comparisons)) {
     group_folder_path, 
     paste0("differential_abundance_", experiment_id, "_", comparison_filter, ".csv")
   )
-  # bug: changed to write.table to remove quotes and row names
-  # write.csv(df_diff_abundance, diff_abundance_file)
+
   write.table(df_diff_abundance, diff_abundance_file, sep = "\t", row.names= FALSE, quote = FALSE)
   
   # plot the corresponding volcano plots
@@ -459,12 +376,13 @@ for (i in seq_along(comparisons)) {
     log2FC = diff,
     significance = pval,
     method = "significant",
-    # target_column = pg_protein_accessions,
-    # target = "P62942",
-    x_axis_label = "log2(fold change) Rapamycin treated vs. untreated",
+    x_axis_label = "log2(fold change) treated vs. untreated",
     significance_cutoff = c(0.05, "adj_pval") 
   ) +
-    geom_text_repel(data = df_diff_abundance, size = 3, aes(x = diff, y = -log10(pval), label = label), min.segment.length = unit(0, 'lines'), nudge_y = 0.1)
+    geom_text_repel(data = df_diff_abundance, 
+                    size = 3, 
+                    aes(x = diff, y = -log10(pval), label = label), 
+                    min.segment.length = unit(0, 'lines'), nudge_y = 0.1)
   
   
   # plot the distribution of the p-values 
@@ -497,8 +415,7 @@ for (i in seq_along(comparisons)) {
     grouping = pg_protein_accessions,
     targets = sort(unique(candidates$pg_protein_accessions)),
     protein_abundance_plot = FALSE
-  ) #+
-    # scale_linetype_manual(values=candidate_summed$line_type)
+  ) 
   
   output_profile_pdf <- file.path(group_folder_path, "candidates_profile_plots.pdf")
   
@@ -547,8 +464,6 @@ for (i in seq_along(comparisons)) {
     
     # Save GO Term enrichment results
     go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".csv"))
-    # bug: changed to write.table to remove quotes and row names
-    # write.csv(df_go_term, go_term_file)
     write.table(df_go_term, go_term_file, sep = "\t", row.names= FALSE, quote = FALSE)
   }, error = function(e) {
     message(paste("Error in GO term enrichment for comparison", comparison_filter, ":", e))
