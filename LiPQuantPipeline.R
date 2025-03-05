@@ -1,3 +1,8 @@
+
+# LiPQuant pipeline
+# not finished 
+
+
 library(yaml)
 library(protti)
 library(tidyr)

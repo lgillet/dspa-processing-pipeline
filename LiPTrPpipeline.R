@@ -1,6 +1,9 @@
 # load arguments
 # use bash: Rscript pipeline.R params.yaml
 
+# LiP MS pipeline
+# with optional Tryptic control
+
 library(yaml)
 library(protti)
 library(tidyr)
