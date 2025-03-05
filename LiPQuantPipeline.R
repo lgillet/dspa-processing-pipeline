@@ -1,7 +1,5 @@
 
 # LiPQuant pipeline
-# not finished 
-
 
 library(yaml)
 library(protti)
@@ -12,6 +10,7 @@ library(doParallel)
 library(ggplot2)
 library(gridExtra)
 library(ggrepel)
+library(magrittr)
 
 registerDoParallel(cores = 10) 
 
@@ -23,15 +22,24 @@ params <- yaml::read_yaml(yaml_file)
 
 group_id <- params$group_id
 input_file <- params$input_file
+input_file_tryptic_control <- params$input_file_tryptic_control
 experiment_ids <- params$experiment_id
 treatment <- params$treatment
 ref_condition <- params$ref_condition
 comparisons <- params$comparison
 output_dir <- params$output_dir
 
-roup_folder_path <- file.path(output_dir, group_id)
+if (!is.null(params$input_file_tryptic_control)) {
+  input_file_tryptic_control <- params$input_file_tryptic_control
+  tryptic_control_data <- protti::read_protti(input_file_tryptic_control)
+} else {
+  input_file_tryptic_control <- NULL
+  tryptic_control_data <- NULL
+}
 
-# bug: adapted "./preprocessed" to output_dir
+
+group_folder_path <- file.path(output_dir, group_id)
+
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
@@ -43,7 +51,7 @@ if (!dir.exists(group_folder_path)) {
 
 # Log outputs to check for errors 
 # Redirect output to a log file
-logfile_dir <- file.path(output_dir, group_id, "processing_log2.txt")
+logfile_dir <- file.path(output_dir, group_id, "processing_log.txt")
 sink(logfile_dir, append = TRUE)
 
 # Print or use the parameters
@@ -63,31 +71,70 @@ plot_list3 <- list()
 plot_list4 <- list()
 
 # load file
-DIA_raw <- read_protti(input_file)
+df <- read_protti(input_file)
 
 # ------------------------------------------------------------------------------
 # Preprocessing 
 # ------------------------------------------------------------------------------
 
-DIA_raw$intensity_log2 <- log2(DIA_raw$fg_ms2raw_quantity)
-DIA_raw$condrep <- paste(DIA_raw$r_condition, DIA_raw$r_replicate, sep = "_")
+df$intensity_log2 <- log2(df$fg_ms2raw_quantity)
+df$condrep <- paste(df$r_condition, df$r_replicate, sep = "_")
 
-DIA_raw_norm <- protti::normalise(
-  DIA_raw,
+plot_list[[1]] <- protti::qc_ids(
+  data = df, 
+  sample = condrep, 
+  grouping = pep_grouping_key, 
+  condition = r_condition, 
+  intensity = fg_quantity
+)+ ggtitle('Precursor ID count per sample')
+
+# bug: added a plot for the number of protein groups
+plot_list[[2]] <- protti::qc_ids(
+  data = df, 
+  sample = condrep, 
+  grouping = pg_protein_accessions, 
+  condition = r_condition, 
+  intensity = pg_quantity
+)+ ggtitle('Protein ID count per sample')
+
+
+# ------------------------------------------------------------------------------
+# Normalize
+# ------------------------------------------------------------------------------
+
+file <- protti::normalise(
+  df,
   sample = r_file_name,
   intensity_log2 = intensity_log2,
   method = "median"
 )
 
+plot_list[[3]] <- protti::qc_intensity_distribution(
+  data = df,
+  sample = condrep,
+  grouping = pep_grouping_key,
+  intensity_log2 = intensity_log2,
+  plot_style = "histogram"
+) + ggtitle('Overall log2 Intensity distribution before normalisation')
+
+plot_list[[4]] <- protti::qc_intensity_distribution(
+  data = df,
+  sample = condrep,
+  grouping = pep_grouping_key,
+  intensity_log2 = normalised_intensity_log2,
+  plot_style = "boxplot"
+) + ggtitle('Run intensities after normalisation')
+
 # bug: included parsing of the protein accession when more than 1 to return the first one alphabetically (to help fetch_uniprot) 
-DIA_clean <- DIA_raw_norm %>%
+df %<>%
   dplyr::filter(intensity_log2 > 10) %>% 
   dplyr::rowwise() %>% 
-  dplyr::mutate(pg_protein_accessions2 = ifelse(base::grepl(";", pg_protein_accessions, fixed = FALSE), base::sort(base::strsplit(pg_protein_accessions, ";", fixed = TRUE)[[1]])[1], pg_protein_accessions)) %>% 
+  dplyr::mutate(pg_protein_accessions2 = ifelse(base::grepl(";", pg_protein_accessions, fixed = FALSE), 
+      base::sort(base::strsplit(pg_protein_accessions, ";", fixed = TRUE)[[1]])[1], pg_protein_accessions)) %>% 
   dplyr::ungroup()
 
-DIA_clean$fg_id <- paste0(DIA_clean$fg_labeled_sequence, DIA_clean$fg_charge)
-unis <- unique(DIA_clean$pg_protein_accessions2) # make vector for fetch_uniprot
+df$fg_id <- paste0(df$fg_labeled_sequence, df$fg_charge)
+unis <- unique(df$pg_protein_accessions2) 
 
 ## Load data from uniprot and join with DIA dataframe
 uniprot <-
@@ -105,7 +152,7 @@ uniprot <-
     )
   ) 
 
-DIA_clean_uniprot <- DIA_clean %>%
+df %<>%
   left_join(uniprot, by = c("pg_protein_accessions2" = "accession")) %>% 
   find_peptide(sequence, pep_stripped_sequence) %>%
   assign_peptide_type(aa_before, last_aa, aa_after) %>%
@@ -113,62 +160,12 @@ DIA_clean_uniprot <- DIA_clean %>%
   calculate_sequence_coverage(protein_sequence = sequence, peptides = pep_stripped_sequence) %>% 
   dplyr::mutate(normalised_intensity = 2^normalised_intensity_log2)
 
-DIA_clean_uniprot_complete <- DIA_clean_uniprot %>% 
+df %<>% 
   distinct(r_file_name, fg_id, normalised_intensity_log2, eg_modified_peptide, pep_stripped_sequence, pg_protein_accessions, gene_names, go_f, r_condition, start, end) %>% 
   tidyr::complete(nesting(r_file_name, r_condition), nesting(pg_protein_accessions, gene_names, go_f, fg_id, eg_modified_peptide, pep_stripped_sequence, start, end))
 
-imputed <- impute_randomforest(
-  DIA_clean_uniprot_complete,
-  sample = r_file_name,
-  grouping = fg_id,
-  intensity_log2 = normalised_intensity_log2,
-  retain_columns = c("eg_modified_peptide", "pep_stripped_sequence", "pg_protein_accessions", 
-                     "gene_names", "go_f", "r_condition", "start", "end"),
-  parallelize = "variables"
-)
-# ------------------------------------------------------------------------------
-# QC plots
-# ------------------------------------------------------------------------------
-
-# bug: for QCs, consider plotting first the plots in the order of processing: DIA_raw first, then DIA_raw_norm and then DIA_clean_uniprot!
-# bug: relabeled the plots accordingly:
-
-plot_list[[1]] <- protti::qc_ids(
-  data = DIA_raw, 
-  sample = condrep, 
-  grouping = pep_grouping_key, 
-  condition = r_condition, 
-  intensity = fg_quantity
-)+ ggtitle('Precursor ID count per sample')
-
-# bug: added a plot for the number of protein groups
-plot_list[[2]] <- protti::qc_ids(
-  data = DIA_raw, 
-  sample = condrep, 
-  grouping = pg_protein_accessions, 
-  condition = r_condition, 
-  intensity = pg_quantity
-)+ ggtitle('Protein ID count per sample')
-
-
-plot_list[[3]] <- protti::qc_intensity_distribution(
-  data = DIA_raw_norm,
-  sample = condrep,
-  grouping = pep_grouping_key,
-  intensity_log2 = intensity_log2,
-  plot_style = "histogram"
-) + ggtitle('Overall log2 Intensity distribution before normalisation')
-
-plot_list[[4]] <- protti::qc_intensity_distribution(
-  data = DIA_raw_norm,
-  sample = condrep,
-  grouping = pep_grouping_key,
-  intensity_log2 = normalised_intensity_log2,
-  plot_style = "boxplot"
-) + ggtitle('Run intensities after normalisation')
-
 plot_list[[5]] <- protti::qc_cvs(
-  data = DIA_clean_uniprot,
+  data = df,
   grouping = fg_id,
   condition = r_condition,
   intensity = normalised_intensity,
@@ -176,11 +173,9 @@ plot_list[[5]] <- protti::qc_cvs(
   plot = TRUE
 )
 
-
 ## Missed cleavages
-# bug: Swaped the count and intensity to have the plot in the same order as missed cleavages
 plot_list[[6]] <- protti::qc_missed_cleavages(
-  data = DIA_clean_uniprot,
+  data = df,
   sample = condrep,
   grouping = fg_id,
   missed_cleavages = pep_nr_of_missed_cleavages,
@@ -191,7 +186,7 @@ plot_list[[6]] <- protti::qc_missed_cleavages(
 )
 
 plot_list[[7]] <- protti::qc_missed_cleavages(
-  data = DIA_clean_uniprot,
+  data = df,
   sample = condrep,
   grouping = fg_id,
   missed_cleavages = pep_nr_of_missed_cleavages,
@@ -201,9 +196,8 @@ plot_list[[7]] <- protti::qc_missed_cleavages(
   interactive = FALSE
 )
 
-
 plot_list[[8]] <- protti::qc_peptide_type(
-  DIA_clean_uniprot,
+  df,
   condrep,
   fg_id,
   pep_type,
@@ -214,7 +208,7 @@ plot_list[[8]] <- protti::qc_peptide_type(
 )
 
 plot_list[[9]] <- protti::qc_peptide_type(
-  DIA_clean_uniprot,
+  df,
   condrep,
   fg_id,
   pep_type,
@@ -225,7 +219,7 @@ plot_list[[9]] <- protti::qc_peptide_type(
 )
 
 ## Principal component analysis (PCA)
-plot_list[[10]] <-DIA_clean_uniprot %>%
+plot_list[[10]] <- df %>%
   protti::qc_pca(
     sample = condrep, 
     grouping = pep_grouping_key, 
@@ -234,18 +228,31 @@ plot_list[[10]] <-DIA_clean_uniprot %>%
   )
 
 ## corelation_map
-# bug: replaced r_filename with r_condition for consistency reasons with other plots
-# bug: added [[4]] to get directly the grob from the pheatmap
 plot_list[[11]] <- protti::qc_sample_correlation(
-  data = DIA_clean_uniprot,
+  data = df,
   sample = condrep,
   grouping = fg_id,
   intensity_log2 = intensity_log2,
   condition = r_condition
 )[[4]]
 
-# bug: added the QC plot to check the intensities before and after imputation
-plot_list[[12]] <- imputed %>%
+
+# ------------------------------------------------------------------------------
+# Impute
+# ------------------------------------------------------------------------------
+
+df <- impute_randomforest(
+  df,
+  sample = r_file_name,
+  grouping = fg_id,
+  intensity_log2 = normalised_intensity_log2,
+  retain_columns = c("eg_modified_peptide", "pep_stripped_sequence", "pg_protein_accessions", 
+                     "gene_names", "go_f", "r_condition", "start", "end"),
+  parallelize = "variables"
+)
+
+
+plot_list[[12]] <- df %>%
   dplyr::rename(imputed_intensity_log2 = normalised_intensity_log2) %>% 
   left_join(distinct(DIA_clean_uniprot_complete, r_file_name, fg_id, normalised_intensity_log2), by = c("r_file_name", "fg_id")) %>% 
   dplyr::select(imputed_intensity_log2, normalised_intensity_log2) %>%
@@ -268,9 +275,12 @@ plot_list[[12]] <- imputed %>%
   theme_bw() + 
   coord_cartesian(xlim = c(5, 30))
 
+# ------------------------------------------------------------------------------
 # Save QC plots
-# bug: changed to ggsave for cleaner output
+# ------------------------------------------------------------------------------
+
 output_qc_pdf <- file.path(group_folder_path, "qc_plots.pdf")
+
 ggsave(
   filename = output_qc_pdf, 
   plot = marrangeGrob(plot_list, nrow=1, ncol=1), 
@@ -278,16 +288,186 @@ ggsave(
 )
 
 # ------------------------------------------------------------------------------
+# Differential analysis
+# ------------------------------------------------------------------------------
+
+for (i in seq_along(comparisons)) {
+  comparison_filter <- comparisons[[i]]
+  experiment_id <- experiment_ids[[i]]
+  
+  comparison_parts <- strsplit(comparison_filter, "_vs_")[[1]] 
+  
+  filtered_data <- df %>%
+    dplyr::filter(r_condition %in% comparison_parts)
+  
+  Volcano_input <- filtered_data %>%
+    unique() %>%
+    protti::assign_missingness(
+      sample = r_file_name,
+      condition = r_condition,
+      grouping = eg_modified_peptide,
+      intensity = normalised_intensity_log2,
+      ref_condition = ref_condition,
+      retain_columns = all_of(c("pg_protein_accessions", "r_file_name", "r_condition", 
+                                "normalised_intensity_log2", 
+                                "go_f", "start", "end"))
+    )
+  
+  df_diff_abundance <- protti::calculate_diff_abundance(
+    data = Volcano_input,
+    sample = r_file_name,
+    condition = r_condition,
+    grouping = eg_modified_peptide,
+    intensity_log2 = normalised_intensity_log2,
+    missingness = missingness,
+    comparison = comparison,
+    method = "moderated_t-test",
+    retain_columns = all_of(c("pg_protein_accessions", "eg_modified_peptide", 
+                              "comparison", "go_f", "start", "end"))
+  )
+  
+  candidates <- df_diff_abundance %>% 
+    dplyr::filter(adj_pval < 0.05 & abs(diff) > 1) %>% 
+    left_join(dplyr::distinct(DIA_clean_uniprot, pg_protein_accessions, gene_names), by = "pg_protein_accessions") %>% 
+    rowwise() %>% 
+    dplyr::mutate(gene = sort(strsplit(gene_names, " ", fixed = TRUE)[[1]])[1]) %>% 
+    ungroup() %>% 
+    dplyr::mutate(label = paste(gene, "@", start, "-", end, sep = "")) %>% 
+    dplyr::mutate(significant = TRUE)
+  
+  print(paste("Number of significantly changing candidates: ", length(unique(candidates$eg_modified_peptide)), " peptide(s) belonging to ", length(unique(candidates$pg_protein_accessions)), " protein(s)."), sep = "")
+  print(distinct(candidates, pg_protein_accessions, eg_modified_peptide, label))
+  
+  df_diff_abundance %<>%
+    left_join(distinct(candidates, eg_modified_peptide, label, significant), by = "eg_modified_peptide") %>% 
+    left_join(dplyr::distinct(DIA_clean_uniprot, pg_protein_accessions, gene_names, sequence, length, coverage), by = "pg_protein_accessions") %>% 
+    rowwise() %>% 
+    dplyr::mutate(gene = sort(strsplit(gene_names, " ", fixed = TRUE)[[1]])[1]) 
+  
+  # Save Differential Abundance results
+  diff_abundance_file <- file.path(
+    group_folder_path, 
+    paste0("differential_abundance_", experiment_id, "_", comparison_filter, ".csv")
+  )
+  
+  write.table(df_diff_abundance, diff_abundance_file, sep = "\t", row.names= FALSE, quote = FALSE)
+  
+  # plot the corresponding volcano plots
+  plot_list2[[1]] <- volcano_plot(
+    data = df_diff_abundance,
+    grouping = eg_modified_peptide,
+    log2FC = diff,
+    significance = pval,
+    method = "significant",
+    x_axis_label = "log2(fold change) treated vs. untreated",
+    significance_cutoff = c(0.05, "adj_pval") 
+  ) +
+    geom_text_repel(data = df_diff_abundance, 
+                    size = 3, 
+                    aes(x = diff, y = -log10(pval), label = label), 
+                    min.segment.length = unit(0, 'lines'), nudge_y = 0.1)
+  
+  
+  # plot the distribution of the p-values 
+  plot_list2[[2]] <- pval_distribution_plot(data = df_diff_abundance,
+                                            grouping = eg_modified_peptide,
+                                            pval = pval
+  )  
+  
+  output_stats_pdf <- file.path(group_folder_path, "statistical_analysis_plots.pdf")
+  
+  ggsave(
+    filename = output_stats_pdf, 
+    plot = marrangeGrob(plot_list2, nrow=1, ncol=1), 
+    width = 8, height = 6
+  )
+  
+  # plot the profile plots for the candidates: 
+  candidate_summed <- DIA_clean_uniprot_summed_protti %>% 
+    dplyr::filter(pg_protein_accessions %in% sort(unique(candidates$pg_protein_accessions))) %>% 
+    left_join(distinct(DIA_clean, r_file_name, condrep), by = "r_file_name") %>% 
+    left_join(distinct(candidates, eg_modified_peptide, significant), by = "eg_modified_peptide") %>% 
+    dplyr::mutate(significant = ifelse(is.na(significant), FALSE, significant)) %>% 
+    dplyr::mutate(line_type = ifelse(significant == TRUE, 'solid', 'dotted'))
+  
+  plot_list3 <- peptide_profile_plot(
+    data = candidate_summed,
+    sample = condrep,
+    peptide = eg_modified_peptide,
+    intensity_log2 = normalised_intensity_log2,
+    grouping = pg_protein_accessions,
+    targets = sort(unique(candidates$pg_protein_accessions)),
+    protein_abundance_plot = FALSE
+  ) 
+  
+  output_profile_pdf <- file.path(group_folder_path, "candidates_profile_plots.pdf")
+  
+  ggsave(
+    filename = output_profile_pdf, 
+    plot = marrangeGrob(plot_list3, nrow=1, ncol=1), 
+    width = 8, height = 6
+  )
+  
+  plot_list4 <- woods_plot(
+    data = df_diff_abundance,
+    fold_change = diff,
+    start_position = start,
+    end_position = end,
+    protein_length = length,
+    coverage = coverage,
+    colouring = adj_pval,
+    protein_id = pg_protein_accessions,
+    targets = sort(unique(candidates$pg_protein_accessions)), 
+    facet = FALSE,
+    fold_change_cutoff = 1,
+    highlight = significant
+  )
+  
+  output_woods_pdf <- file.path(group_folder_path, "candidates_woods_plots.pdf")
+  
+  ggsave(
+    filename = output_woods_pdf, 
+    plot = marrangeGrob(plot_list4, nrow=1, ncol=1), 
+    width = 8, height = 6
+  )
+  
+  # Calculate GO term enrichment with error handling
+  tryCatch({
+    df_diff_abundance_significant <- df_diff_abundance %>%
+      dplyr::mutate(significant = ifelse(!is.na(adj_pval) & adj_pval < 0.05, TRUE, FALSE)) 
+    
+    df_go_term <- protti::calculate_go_enrichment(
+      data = df_diff_abundance_significant,
+      protein_id = pg_protein_accessions,
+      go_annotations_uniprot = go_f,
+      is_significant = significant,
+      min_n_detected_proteins_in_process = 3,
+      plot = FALSE
+    )
+    
+    # Save GO Term enrichment results
+    go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".csv"))
+    write.table(df_go_term, go_term_file, sep = "\t", row.names= FALSE, quote = FALSE)
+  }, error = function(e) {
+    message(paste("Error in GO term enrichment for comparison", comparison_filter, ":", e))
+  })
+}
+
+# ------------------------------------------------------------------------------
 # LiP-Quant Analysis
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# Dose Response
 # ------------------------------------------------------------------------------
 # Adding dose-response analysis using `parallel_fit_drc_4p`
 
 # Ensure a numeric concentration column exists for dose-response fitting
-DIA_clean_uniprot_summed_protti$conc_frag <- as.numeric(gsub("_mM", "", DIA_clean_uniprot_summed_protti$r_condition))
+file$conc_frag <- as.numeric(gsub("_mM", "", file$r_condition))
 
 # Perform parallel dose-response fitting
 lipquant_results <- protti::parallel_fit_drc_4p(
-  data = DIA_clean_uniprot_summed_protti,
+  data = df,
   sample = r_file_name,
   grouping = pep_stripped_sequence,
   intensity_log2 = normalised_intensity_log2,
