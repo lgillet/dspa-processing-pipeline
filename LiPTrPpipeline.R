@@ -696,7 +696,7 @@ for (i in seq_along(comparisons)) {
       n_obs = n_obs,
       std_error = std_error,
       p_adj_method = "BH",
-      retain_columns = c("missingness"),
+      retain_columns = all_of(c("missingness", "go_f")),
       method = "satterthwaite"
     )
 
@@ -935,7 +935,7 @@ for (i in seq_along(comparisons)) {
     
     # Calculate GO term enrichment with error handling
     tryCatch({
-      df_diff_abundance_significant <- df_diff_abundance %>%
+      df_diff_abundance_significant <- corrected %>%
         dplyr::mutate(significant = ifelse(!is.na(adj_pval) & adj_pval < 0.05, TRUE, FALSE)) 
       
       df_go_term <- protti::calculate_go_enrichment(
