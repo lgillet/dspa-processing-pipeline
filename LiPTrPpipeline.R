@@ -24,11 +24,11 @@ params <- yaml::read_yaml(yaml_file)
 
 #####
 # debugging: load the files manually and fix the OSX path to Windows:
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-yaml_file <- "PXD022297_Valentina_Osmotic.yaml"
-params <- yaml::read_yaml("Y:/LiP-Atlas/preprocessed/20250124_142925_PXD022297_Valentina_Osmotic_LiP/PXD022297_Valentina_Osmotic.yaml")
-params <- lapply(params, function(x) gsub("G:/Biognosys/Spectronaut/results/", "Y:/LiP-Atlas/preprocessed/", x, fixed = FALSE))
-params$output_dir <- paste(params$output_dir, "_ValeOmso_Ludo", sep = "")
+# setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# yaml_file <- "PXD022297_Valentina_Osmotic.yaml"
+# params <- yaml::read_yaml("Y:/LiP-Atlas/preprocessed/20250124_142925_PXD022297_Valentina_Osmotic_LiP/PXD022297_Valentina_Osmotic.yaml")
+# params <- lapply(params, function(x) gsub("G:/Biognosys/Spectronaut/results/", "Y:/LiP-Atlas/preprocessed/", x, fixed = FALSE))
+# params$output_dir <- paste(params$output_dir, "_ValeOmso_Ludo", sep = "")
 #####
 
 # Access the parameters
@@ -138,12 +138,14 @@ DIA_clean_uniprot_complete <- DIA_clean_uniprot %>%
   distinct(r_file_name, fg_id, normalised_intensity_log2, eg_modified_peptide, pep_stripped_sequence, pg_protein_accessions, gene_names, go_f, r_condition, start, end) %>% 
   tidyr::complete(nesting(r_file_name, r_condition), nesting(pg_protein_accessions, gene_names, go_f, fg_id, eg_modified_peptide, pep_stripped_sequence, start, end))
 
+# imputed <- read.csv("C:/Users/lgillet/Documents/IMSB2/github_lgillet/dspa-processing-pipeline/preprocessed_ValeOmso_Ludo/GRP000001/imputed.tsv", sep = "\t", header = TRUE)
+
 imputed <- impute_randomforest(
   DIA_clean_uniprot_complete,
   sample = r_file_name,
   grouping = fg_id,
   intensity_log2 = normalised_intensity_log2,
-  retain_columns = c("eg_modified_peptide", "pep_stripped_sequence", "pg_protein_accessions", 
+  retain_columns = c("eg_modified_peptide", "pep_stripped_sequence", "pg_protein_accessions",
                      "gene_names", "go_f", "r_condition", "start", "end"),
   parallelize = "variables"
 )
@@ -151,7 +153,6 @@ imputed <- impute_randomforest(
 imputed_file <- file.path(group_folder_path, paste0("imputed.tsv"))
 write.table(imputed, imputed_file, sep = "\t", row.names= FALSE, quote = FALSE)
 save.image("./all_data.RData")
-
 
 # sum up precursors to peptide level and keep only one entry per pep_stripped_sequence
 DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
@@ -169,7 +170,6 @@ DIA_clean_uniprot_summed_protti <- protti::calculate_protein_abundance(
 )
 
 dia_clean_file <- file.path(group_folder_path, paste0("dia_clean_uniprot.tsv"))
-write.csv(DIA_clean_uniprot_summed_protti, dia_clean_file)
 write.table(DIA_clean_uniprot_summed_protti, dia_clean_file, sep = "\t", row.names= FALSE, quote = FALSE)
 
 # ------------------------------------------------------------------------------
@@ -376,8 +376,9 @@ if (!is.null(input_file_tryptic_control)) {
     tidyr::complete(nesting(r_file_name, r_condition), nesting(pg_protein_accessions, pg_protein_accessions2, gene_names, go_f, fg_id, eg_modified_peptide, pep_stripped_sequence, start, end))
   
   # Save preprocessed tryptic control data
-  write.csv(tryptic_clean_uniprot_complete, file.path(group_folder_path, "tryptic_control_clean.csv"))
+  write.table(tryptic_clean_uniprot_complete, file.path(group_folder_path, "tryptic_control_clean.tsv"), sep = "\t", row.names= FALSE, quote = FALSE)
 
+  
   # calculate protein abundance
   tryptic_protein_abundance <- calculate_protein_abundance(
     tryptic_clean_uniprot,
@@ -394,7 +395,7 @@ if (!is.null(input_file_tryptic_control)) {
   
   
   tryptic_clean_file <- file.path(group_folder_path, paste0("tryptic_uniprot.tsv"))
-  # write.csv(tryptic_protein_abundance, tryptic_clean_file)
+
   write.table(tryptic_protein_abundance, tryptic_clean_file, sep = "\t", row.names= FALSE, quote = FALSE)
   
   
@@ -597,7 +598,7 @@ for (i in seq_along(comparisons)) {
     # Save Differential Abundance results
     diff_trp_file <- file.path(
       group_folder_path, 
-      paste0("trp_differential_abundance_", experiment_ids, "_", comparisons, ".csv")
+      paste0("trp_differential_abundance_", experiment_ids, "_", comparisons, ".tsv")
     )
     
     write.table(diff_trp, diff_trp_file, sep = "\t", row.names= FALSE, quote = FALSE)
@@ -673,7 +674,7 @@ for (i in seq_along(comparisons)) {
       )
       
       # Save GO Term enrichment results
-      go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".csv"))
+      go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".tsv"))
       write.table(df_go_term, go_term_file, sep = "\t", row.names= FALSE, quote = FALSE)
     }, error = function(e) {
       message(paste("Error in GO term enrichment for comparison", comparison_filter, ":", e))
@@ -698,11 +699,11 @@ for (i in seq_along(comparisons)) {
       retain_columns = c("missingness"),
       method = "satterthwaite"
     )
-    
+
     # bug: output some important plots to pdf and results to the log file: 
     candidates <- corrected %>% 
       dplyr::filter(adj_pval < 0.05 & abs(adj_diff) > 1) %>% 
-      left_join(dplyr::distinct(DIA_clean_uniprot, eg_modified_peptide, pg_protein_accessions2, gene_names, start, end), by = "eg_modified_peptide") %>% 
+      left_join(dplyr::distinct(DIA_clean_uniprot, eg_modified_peptide, pg_protein_accessions2, gene_names, coverage, length, start, end), by = "eg_modified_peptide") %>% 
       rowwise() %>% 
       dplyr::mutate(gene = sort(strsplit(gene_names, " ", fixed = TRUE)[[1]])[1]) %>% 
       ungroup() %>% 
@@ -713,12 +714,12 @@ for (i in seq_along(comparisons)) {
     print(distinct(candidates, pg_protein_accessions, eg_modified_peptide, label))
     
     corrected <- corrected %>%
-      left_join(distinct(candidates, eg_modified_peptide, label, significant), by = "eg_modified_peptide") 
+      left_join(distinct(candidates, eg_modified_peptide, start, end, label, coverage, length, significant), by = "eg_modified_peptide") 
       
     # Save Differential Abundance results
     corrected_file <- file.path(
       group_folder_path, 
-      paste0("differential_abundance_", experiment_id, "_", comparison_filter, ".csv")
+      paste0("differential_abundance_", experiment_id, "_", comparison_filter, ".tsv")
     )
 
     write.table(corrected, corrected_file, sep = "\t", row.names= FALSE, quote = FALSE)
@@ -781,7 +782,7 @@ for (i in seq_along(comparisons)) {
   
     plot_list7 <- woods_plot(
       data = corrected,
-      fold_change = diff,
+      fold_change = adj_diff,
       start_position = start,
       end_position = end,
       protein_length = length,
@@ -798,7 +799,7 @@ for (i in seq_along(comparisons)) {
   
     ggsave(
       filename = output_woods_pdf, 
-      plot = marrangeGrob(plot_list4, nrow=1, ncol=1), 
+      plot = marrangeGrob(plot_list7, nrow=1, ncol=1), 
       width = 8, height = 6
     )
   
@@ -817,7 +818,7 @@ for (i in seq_along(comparisons)) {
       )
     
       # Save GO Term enrichment results
-      go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".csv"))
+      go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".tsv"))
       write.table(df_go_term, go_term_file, sep = "\t", row.names= FALSE, quote = FALSE)
     }, error = function(e) {
       message(paste("Error in GO term enrichment for comparison", comparison_filter, ":", e))
@@ -848,7 +849,7 @@ for (i in seq_along(comparisons)) {
     # Save Differential Abundance results
     diff_abundance_file <- file.path(
       group_folder_path, 
-      paste0("differential_abundance_", experiment_id, "_", comparison_filter, ".csv")
+      paste0("differential_abundance_", experiment_id, "_", comparison_filter, ".tsv")
     )
     
     write.table(df_diff_abundance, diff_abundance_file, sep = "\t", row.names= FALSE, quote = FALSE)
@@ -910,8 +911,8 @@ for (i in seq_along(comparisons)) {
     )
     
     plot_list7 <- woods_plot(
-      data = df_diff_abundance,
-      fold_change = diff,
+      data = corrected,
+      fold_change = adj_diff,
       start_position = start,
       end_position = end,
       protein_length = length,
@@ -947,7 +948,7 @@ for (i in seq_along(comparisons)) {
       )
       
       # Save GO Term enrichment results
-      go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".csv"))
+      go_term_file <- file.path(group_folder_path, paste0("go_term_", experiment_id, "_", comparison_filter, ".tsv"))
       write.table(df_go_term, go_term_file, sep = "\t", row.names= FALSE, quote = FALSE)
     }, error = function(e) {
       message(paste("Error in GO term enrichment for comparison", comparison_filter, ":", e))
