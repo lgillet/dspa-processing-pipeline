@@ -15,10 +15,19 @@ library(magrittr)
 registerDoParallel(cores = 10) 
 
 # Read the YAML file
-args <- commandArgs(trailingOnly = TRUE)
+# args <- commandArgs(trailingOnly = TRUE)
 # Expect the first argument to be the path to the YAML file
-yaml_file <- args[1]
-params <- yaml::read_yaml(yaml_file)
+# yaml_file <- args[1]
+# params <- yaml::read_yaml(yaml_file)
+
+# debugging: load the files manually and fix the OSX path to Windows:
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+yaml_file <- "rapamycin.yaml"
+params <- yaml::read_yaml("./rapamycin.yaml")
+params <- lapply(params, function(x) gsub("/Volumes/biol_bc_picotti_1/", "Y:/", x, fixed = FALSE))
+params$output_dir <- paste(params$output_dir, "_ludo", sep = "")
+#####
+
 
 group_id <- params$group_id
 input_file <- params$input_file
@@ -36,7 +45,8 @@ if (!is.null(params$input_file_tryptic_control)) {
   input_file_tryptic_control <- NULL
   tryptic_control_data <- NULL
 }
-
+# BUG: getting an error here upon parsing input_file_tryptic_control =>  character(0) different than "is.null"?!
+# check in the other yaml files how this was entered (when no trp_ctrl)
 
 group_folder_path <- file.path(output_dir, group_id)
 
